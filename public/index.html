@@ -21,9 +21,9 @@
       e.preventDefault();
     });
   </script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+  <script src="vendor/pdf.min.js"></script>
+  <script src="vendor/pdf-lib.min.js"></script>
+  <script src="vendor/mammoth.browser.min.js"></script>
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -356,10 +356,10 @@
     };
   }
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="vendor/tesseract.min.js"></script>
   <!-- Export libraries -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="vendor/docx.umd.js"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{background:#f8fafc;color:#1e293b;font-family:'Segoe UI',system-ui,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
@@ -3297,7 +3297,7 @@ async function synthesize(system, history){
 async function extractPdfText(b64){
   try{
     if(!window.pdfjsLib) return null;
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc="vendor/pdf.worker.min.js";
     const data=atob(b64); const bytes=new Uint8Array(data.length);
     for(let i=0;i<data.length;i++) bytes[i]=data.charCodeAt(i);
     const pdf=await window.pdfjsLib.getDocument({data:bytes}).promise;
@@ -3508,7 +3508,7 @@ async function extractPdfTextFromDataUrl(dataUrl){
     var bytes = new Uint8Array(bin.length);
     for(var i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
     if(window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc){
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc="vendor/pdf.worker.min.js";
     }
     var pdf = await window.pdfjsLib.getDocument({data:bytes}).promise;
     var text = "";
