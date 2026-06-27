@@ -639,11 +639,11 @@
         </div>
       </button>
       <button onclick="pickMode('chain')" style="display:flex;align-items:center;gap:14px;padding:14px 16px;background:#fff7ed;border:2px solid #fed7aa;border-radius:12px;cursor:pointer;text-align:left;width:100%">
-        <span style="font-size:28px">🔗</span>
+        <span style="font-size:28px">⚖️</span>
         <div>
-          <div style="font-size:15px;font-weight:700;color:#1e293b">Вариант Б — Цепочка</div>
-          <div style="font-size:12px;color:#64748b;margin-top:2px">Каждый агент передаёт контекст следующему → глубокий анализ</div>
-          <div style="font-size:11px;color:#f59e0b;margin-top:3px">⏱ Дольше · Perplexity→Gemini→Kimi→GPT→Claude→DeepSeek</div>
+          <div style="font-size:15px;font-weight:700;color:#1e293b">Вариант Б — Дебаты</div>
+          <div style="font-size:12px;color:#64748b;margin-top:2px">Агенты спорят и обмениваются аргументами → единый согласованный ответ</div>
+          <div style="font-size:11px;color:#f59e0b;margin-top:3px">⏱ Дольше · 3 раунда обсуждения + итоговый консенсус</div>
         </div>
       </button>
       <button onclick="pickMode('parallel')" style="display:flex;align-items:center;gap:14px;padding:14px 16px;background:#f8fafc;border:2px solid #e2e8f0;border-radius:12px;cursor:pointer;text-align:left;width:100%">
@@ -4198,25 +4198,6 @@ async function sendChain(text, inp){
   const agents=getAgents();
   if(!agents.length){alert("Нет активных агентов");return;}
 
-  // Фиксированный порядок цепочки
-  const CHAIN_ORDER=["perplexity","gemini","kimi","gpt","claude","deepseek"];
-  const orderedAgents=[];
-  CHAIN_ORDER.forEach(id=>{const a=agents.find(x=>x.id===id);if(a)orderedAgents.push(a);});
-  // Агенты вне порядка — в конец
-  agents.forEach(a=>{if(!CHAIN_ORDER.includes(a.id))orderedAgents.push(a);});
-
-  if(!orderedAgents.length){alert("Нет активных агентов");return;}
-
-  // Роли каждого звена
-  const CHAIN_ROLES={
-    perplexity:"найди актуальные факты из интернета по этому вопросу",
-    gemini:"проанализируй и структурируй информацию от предыдущего агента",
-    kimi:"добавь креативные идеи и финансовый анализ к собранной информации",
-    gpt:"дай конкретные практические рекомендации и пошаговые советы",
-    claude:"синтезируй всё в глубокий финальный ответ",
-    deepseek:"проверь логику и факты, исправь ошибки если есть"
-  };
-
   // Файлы
   const filesToSend=[...currentFiles];
   const imageFiles=filesToSend.filter(f=>f.type.startsWith("image/")&&f.b64);
@@ -4252,86 +4233,128 @@ async function sendChain(text, inp){
   document.getElementById("sendBtn").disabled=true;
   document.getElementById("sendBtn").style.background="#374151";
 
-  const turnId="chain_"+Date.now();
-  const cols=orderedAgents.length<=4?2:3;
-  appendTurnContainer(turnId,orderedAgents,cols);
+  const turnId="debate_"+Date.now();
+  const cols=agents.length<=4?2:3;
+  appendTurnContainer(turnId,agents,cols);
 
-  // Индикатор цепочки
-  const container=document.getElementById(turnId);
+  // Индикатор режима дебатов
+  const container=document.getElementById(turnId+"_container")||document.getElementById(turnId);
   if(container){
     const bar=document.createElement("div");
+    bar.id=turnId+"_debate_bar";
     bar.style.cssText="padding:8px 12px;background:linear-gradient(135deg,#fff7ed,#fef3c7);border-bottom:2px solid #fde68a;font-size:12px;color:#92400e;display:flex;align-items:center;gap:6px;flex-wrap:wrap;border-radius:8px 8px 0 0";
-    bar.innerHTML="🔗 <b>Вариант Б — Цепочка:</b> "+orderedAgents.map(a=>a.emoji+" "+a.name).join(" → ")+"<span style='margin-left:auto;font-size:10px;color:#b45309'>каждый агент читает ответ предыдущего</span>";
+    bar.innerHTML="⚖️ <b>Вариант Б — Дебаты:</b> Раунд 1 — независимые позиции...<span style='margin-left:auto;font-size:10px;color:#b45309'>"+agents.map(a=>a.emoji).join(" ")+"</span>";
     container.insertBefore(bar,container.firstChild);
   }
 
-  const results={};
-  let chainContext="";
-
-  for(let i=0;i<orderedAgents.length;i++){
-    const a=orderedAgents[i];
-    const role=CHAIN_ROLES[a.id]||"дополни ответ своим анализом";
-    const stepNum=["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣"][i]||(i+1+".");
-
-    // Обновляем статус ожидающих карточек
-    if(i>0){
-      const el=document.getElementById(turnId+"_"+a.id+"_text");
-      if(el)el.innerHTML='<span style="color:#94a3b8;font-size:13px">⏳ Ожидает...</span>';
+  const visionSet=new Set(["claude","gemini","perplexity","gpt","kimi"]);
+  function makeVisionHistoryFor(a, baseHistory, msgText){
+    if(!imageFiles.length) return [...baseHistory.slice(0,-1),{role:"user",content:today+msgText}];
+    if(a.id==="claude"){
+      const content=[{type:"text",text:today+msgText}];
+      imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
+      return [...baseHistory.slice(0,-1),{role:"user",content}];
+    } else if(visionSet.has(a.id)){
+      const content=[];
+      imageFiles.forEach(f=>content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}}));
+      content.push({type:"text",text:today+msgText});
+      return [...baseHistory.slice(0,-1),{role:"user",content}];
     }
-
-    // Формируем запрос
-    let chainMsg=text;
-    if(i>0&&chainContext){
-      const prevSummary=chainContext.slice(-3000);
-      chainMsg=text+"\n\n=== Контекст от предыдущих агентов ===\n"+prevSummary+"\n=== Конец контекста ===\n\nТвоя задача: "+role+". Не повторяй уже сказанное — добавь своё уникальное.";
-    }
-
-    let h=[...history.slice(0,-1),{role:"user",content:today+chainMsg}];
-    // Передаём изображения первому агенту цепочки
-    if(i===0&&imageFiles.length>0){
-      if(a.id==="claude"){
-        const imgContent=[{type:"text",text:today+chainMsg}];
-        imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;imgContent.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
-        h=[...history.slice(0,-1),{role:"user",content:imgContent}];
-      } else if(["gemini","gpt","perplexity","kimi"].includes(a.id)){
-        const imgContent=[];
-        imageFiles.forEach(f=>imgContent.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}}));
-        imgContent.push({type:"text",text:today+chainMsg});
-        h=[...history.slice(0,-1),{role:"user",content:imgContent}];
-      }
-    }
-
-    const chunkHandler=(partial)=>{
-      const el=document.getElementById(turnId+"_"+a.id+"_text");
-      if(el){el.innerHTML=renderMd(partial);scrollToBottom();}
-    };
-
-    try{
-      const ans=await callAgent(a,today+a.system,h,chunkHandler);
-      results[a.id]={status:"ok",text:ans};
-      chainContext+=a.name+" ("+stepNum+"): "+ans+"\n\n";
-      const el=document.getElementById(turnId+"_"+a.id+"_text");
-      if(el){
-        const ctxNote = i>0 ? '<div style="margin-bottom:8px;padding:6px 8px;background:#f0fdf4;border-left:3px solid #10a779;border-radius:4px;font-size:10px;color:#166534">'+stepNum+' Получил контекст от предыдущих агентов ('+Math.min(chainContext.length-ans.length,2000)+' симв.) и добавил свой анализ</div>' : '<div style="margin-bottom:8px;padding:6px 8px;background:#eff6ff;border-left:3px solid #3b82f6;border-radius:4px;font-size:10px;color:#1d4ed8">'+stepNum+' Первое звено — поиск исходных данных</div>';
-        el.insertAdjacentHTML("afterbegin", ctxNote);
-        el.insertAdjacentHTML("beforeend",'<div style="margin-top:6px;padding-top:4px;border-top:1px solid #e2e8f0;font-size:10px;color:#10a779">✅ '+stepNum+' завершено</div>');
-      }
-    }catch(e){
-      results[a.id]={status:"error",text:e.message};
-      chainContext+=a.name+": [не ответил — "+e.message.slice(0,100)+"]\n\n";
-      const el=document.getElementById(turnId+"_"+a.id+"_text");
-      if(el)el.insertAdjacentHTML("afterbegin",'<div style="color:#ef4444;font-size:11px;margin-bottom:4px">❌ '+stepNum+' пропущен</div>');
-    }
-    updateAgentCard(turnId,a,results[a.id]);
+    return [...baseHistory.slice(0,-1),{role:"user",content:today+msgText}];
   }
 
-  // Финальный ответ = последнее успешное звено
-  const okAgents=orderedAgents.filter(a=>results[a.id]?.status==="ok");
-  const consolidated=okAgents.length>0?results[okAgents[okAgents.length-1].id].text:"Ни один агент не ответил.";
+  // ── РАУНД 1 — независимые первичные позиции, параллельно ──
+  const round1={};
+  await Promise.all(agents.map(async a=>{
+    const el0=document.getElementById(turnId+"_"+a.id+"_text");
+    if(el0) el0.innerHTML='<div style="font-size:10px;color:#3b82f6;margin-bottom:4px">1️⃣ Раунд 1 — первичная позиция</div><span class="pulse">Думает...</span>';
+    try{
+      const h=makeVisionHistoryFor(a, history, text);
+      const ans=await callAgent(a,today+a.system,h,(partial)=>{
+        const el=document.getElementById(turnId+"_"+a.id+"_text");
+        if(el){el.innerHTML='<div style="font-size:10px;color:#3b82f6;margin-bottom:4px">1️⃣ Раунд 1 — первичная позиция</div>'+renderMd(partial);scrollToBottom();}
+      });
+      round1[a.id]={status:"ok",text:ans};
+    }catch(e){ round1[a.id]={status:"error",text:e.message}; }
+    updateAgentCard(turnId,a,round1[a.id]);
+  }));
 
-  // Итог цепочки — переименовываем блок
-  updateConsolidated(turnId,consolidated,"","🔗 Итог цепочки");
-  chat.messages.push({role:"assistant",content:consolidated,agentResults:results,chainMode:true,ts:Date.now()});
+  const okRound1=agents.filter(a=>round1[a.id]?.status==="ok");
+  if(!okRound1.length){
+    updateConsolidated(turnId,"Ни один агент не ответил в раунде 1.","","⚖️ Дебаты не состоялись");
+    thinking=false;
+    document.getElementById("sendBtn").disabled=false;
+    document.getElementById("sendBtn").style.background="linear-gradient(135deg,#6366f1,#8b5cf6)";
+    return;
+  }
+
+  const bar2=document.getElementById(turnId+"_debate_bar");
+  if(bar2) bar2.innerHTML="⚖️ <b>Вариант Б — Дебаты:</b> Раунд 2 — реакция на аргументы коллег...<span style='margin-left:auto;font-size:10px;color:#b45309'>"+okRound1.map(a=>a.emoji).join(" ")+"</span>";
+
+  // ── РАУНД 2 — каждый видит позиции остальных, спорит/соглашается ──
+  const round2={};
+  await Promise.all(okRound1.map(async a=>{
+    const others=okRound1.filter(x=>x.id!==a.id).map(x=>x.name+": "+round1[x.id].text.slice(0,1200)).join("\n\n");
+    const debateMsg=text+"\n\n=== Позиции других агентов (Раунд 1) ===\n"+others
+      +"\n=== Конец позиций ===\n\nТы уже дал свой первичный ответ выше в этом разговоре. Теперь изучи аргументы коллег. "
+      +"Если согласен с кем-то — явно подтверди и объясни почему. Если не согласен — укажи конкретно расхождение и приведи контраргумент. "
+      +"Главная цель — попытаться сблизить позиции и прийти к общему мнению там, где это возможно. Дай обновлённый, более точный ответ с учётом этой дискуссии.";
+    const el0=document.getElementById(turnId+"_"+a.id+"_text");
+    if(el0) el0.innerHTML='<div style="font-size:10px;color:#f59e0b;margin-bottom:4px">2️⃣ Раунд 2 — реакция на аргументы коллег</div><span class="pulse">Изучает аргументы...</span>';
+    try{
+      const h=makeVisionHistoryFor(a, history, debateMsg);
+      const ans=await callAgent(a,today+a.system,h,(partial)=>{
+        const el=document.getElementById(turnId+"_"+a.id+"_text");
+        if(el){el.innerHTML='<div style="font-size:10px;color:#f59e0b;margin-bottom:4px">2️⃣ Раунд 2 — реакция на аргументы коллег</div>'+renderMd(partial);scrollToBottom();}
+      });
+      round2[a.id]={status:"ok",text:ans};
+    }catch(e){ round2[a.id]={status:"ok",text:round1[a.id].text}; } // если раунд 2 не удался — берём позицию из раунда 1
+    updateAgentCard(turnId,a,round2[a.id]);
+  }));
+
+  const bar3=document.getElementById(turnId+"_debate_bar");
+  if(bar3) bar3.innerHTML="⚖️ <b>Вариант Б — Дебаты:</b> Раунд 3 — финальное сближение позиций...<span style='margin-left:auto;font-size:10px;color:#b45309'>"+okRound1.map(a=>a.emoji).join(" ")+"</span>";
+
+  // ── РАУНД 3 — финальная попытка сблизить позиции перед итогом ──
+  const round3={};
+  await Promise.all(okRound1.map(async a=>{
+    const othersR2=okRound1.filter(x=>x.id!==a.id).map(x=>x.name+": "+(round2[x.id]?.text||round1[x.id].text).slice(0,1200)).join("\n\n");
+    const finalDebateMsg=text+"\n\n=== Обновлённые позиции других агентов (Раунд 2) ===\n"+othersR2
+      +"\n=== Конец позиций ===\n\nЭто финальный раунд перед общим решением. Изучи, как изменились позиции коллег после обсуждения. "
+      +"Явно укажи: 1) с чем из их обновлённых позиций ты теперь согласен 2) если что-то остаётся спорным — кратко обозначь это и в последний раз попробуй найти компромисс. "
+      +"Дай свой финальный ответ, максимально близкий к общей позиции, если она достижима.";
+    const el0=document.getElementById(turnId+"_"+a.id+"_text");
+    if(el0) el0.innerHTML='<div style="font-size:10px;color:#7c3aed;margin-bottom:4px">3️⃣ Раунд 3 — финальное сближение позиций</div><span class="pulse">Финализирует позицию...</span>';
+    try{
+      const h=makeVisionHistoryFor(a, history, finalDebateMsg);
+      const ans=await callAgent(a,today+a.system,h,(partial)=>{
+        const el=document.getElementById(turnId+"_"+a.id+"_text");
+        if(el){el.innerHTML='<div style="font-size:10px;color:#7c3aed;margin-bottom:4px">3️⃣ Раунд 3 — финальное сближение позиций</div>'+renderMd(partial);scrollToBottom();}
+      });
+      round3[a.id]={status:"ok",text:ans};
+    }catch(e){ round3[a.id]={status:"ok",text:round2[a.id]?.text||round1[a.id].text}; } // если раунд 3 не удался — берём позицию из раунда 2
+    updateAgentCard(turnId,a,round3[a.id]);
+  }));
+
+  const bar4=document.getElementById(turnId+"_debate_bar");
+  if(bar4) bar4.innerHTML="⚖️ <b>Вариант Б — Дебаты:</b> завершено — формирую согласованный ответ...<span style='margin-left:auto;font-size:10px;color:#b45309'>"+okRound1.map(a=>a.emoji).join(" ")+"</span>";
+
+  // ── ИТОГ — единый согласованный ответ после трёх раундов обсуждения ──
+  const finalPositions=okRound1.map(a=>a.name+": "+(round3[a.id]?.text||round2[a.id]?.text||round1[a.id].text)).join("\n\n---\n\n");
+  let consensus="";
+  try{
+    consensus=await synthesize(
+      "Ты медиатор-судья. Перед тобой финальные позиции нескольких AI-агентов после ТРЁХ раундов обсуждения друг с другом. "
+      +"Сформулируй ЕДИНЫЙ согласованный ответ на исходный вопрос, объединяя то, в чём агенты сошлись после спора. "
+      +"Если по какому-то конкретному пункту консенсус так и не достигнут даже после трёх раундов — кратко укажи это отдельно в конце, но основной текст должен звучать как один цельный уверенный ответ, а не как пересказ разных мнений. Не пиши вступлений вроде 'на основе обсуждения агентов'.",
+      [{role:"user",content:"Вопрос: "+text+"\n\nФинальные позиции агентов после трёх раундов обсуждения друг с другом:\n"+finalPositions+"\n\nДай единый итоговый согласованный ответ:"}]
+    );
+  }catch(e){
+    consensus=round3[okRound1[0].id]?.text||round2[okRound1[0].id]?.text||round1[okRound1[0].id].text||"Не удалось получить согласованный ответ.";
+  }
+
+  updateConsolidated(turnId,consensus,"","🤝 Согласованный ответ (после 3 раундов дебатов)");
+  chat.messages.push({role:"assistant",content:consensus,agentResults:round3,debateMode:true,ts:Date.now()});
   saveChats(chats);
 
   thinking=false;
@@ -6477,136 +6500,4 @@ async function extractFactsFromDialog(messages){
     + "\n\nДИАЛОГ:\n" + dialogText;
 
   try{
-    var extractBody = JSON.stringify({ model:"claude-haiku-4-5", max_tokens:300, messages:[{role:"user",content:prompt}] });
-    var data;
-    if(isMobile){
-      data = await proxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, extractBody);
-    } else {
-      var resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type":"application/json", "x-api-key": keys.claude, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
-        body: extractBody
-      });
-      data = await resp.json();
-    }
-    var text = (data.content&&data.content[0]&&data.content[0].text)||"[]";
-    text = text.replace(/```json|```/g,"").trim();
-    var newFacts = JSON.parse(text);
-    if(!Array.isArray(newFacts) || !newFacts.length) return;
-
-    // Дедупликация — последний защитный барьер на случай, если модель всё же
-    // вернула что-то очень похожее на уже существующее (точное или почти точное совпадение).
-    // Основная дедупликация теперь происходит на уровне промпта (модель видит существующие факты).
-    var existingLower = existingFacts.map(function(f){ return f.toLowerCase().trim(); });
-    var added = [];
-    newFacts.forEach(function(factText){
-      if(typeof factText !== "string" || factText.length < 5) return;
-      var low = factText.toLowerCase().trim();
-      if(existingLower.includes(low)) return; // точное совпадение — пропускаем
-      window.userMemory.facts.push({ id: Date.now()+"_"+Math.random(), text: factText, ts: Date.now(), confirmed: true });
-      existingLower.push(low);
-      added.push(factText);
-    });
-
-    if(added.length > 0){
-      persistMemory();
-      updateMemoryBadge();
-      // Ненавязчивое уведомление
-      setTimeout(function(){
-        showToast("🧠 Запомнил: " + added[0] + (added.length > 1 ? " +" + (added.length-1) + " фактов" : ""));
-      }, 1500);
-    }
-  }catch(e){ console.warn("extractFacts error:", e); }
-}
-
-// Кнопка «Извлечь сейчас» — берём последний чат
-async function extractFactsNow(){
-  var btn = document.getElementById("extractBtn");
-  if(btn){ btn.textContent = "⏳ Извлекаю..."; btn.disabled = true; }
-  try{
-    var chatKey = typeof getChatKey === "function" ? getChatKey() : "ai_hub_chats_v4";
-    var allChats = JSON.parse(localStorage.getItem(chatKey)||"[]");
-    var messages = [];
-    allChats.slice(0,3).forEach(function(c){ if(c.messages) messages = messages.concat(c.messages.slice(-6)); });
-    await extractFactsFromDialog(messages);
-    renderFactsList();
-  }catch(e){ showToast("❌ Ошибка извлечения: " + e.message); }
-  if(btn){ btn.textContent = "🔍 Извлечь сейчас"; btn.disabled = false; }
-}
-
-// Разовая семантическая дедупликация уже сохранённых фактов через Claude Haiku.
-// Нужна для очистки фактов, накопленных до того, как извлечение стало
-// учитывать существующий список (см. extractFactsFromDialog) — например,
-// "Ищет дешёвые авиабилеты" и "Интересуется поиском дешёвых авиабилетов".
-async function dedupFactsNow(){
-  var facts = window.userMemory.facts || [];
-  if(facts.length < 2){ showToast("Недостаточно фактов для очистки"); return; }
-  var keys = getKeys ? getKeys() : {};
-  if(!keys.claude){ showToast("⚠️ Нужен ключ Claude в ⚙️ Настройки"); return; }
-  var btn = document.getElementById("dedupBtn");
-  if(btn){ btn.textContent = "⏳ Чищу..."; btn.disabled = true; }
-  try{
-    var numbered = facts.map(function(f,i){ return (i+1) + ". " + f.text; }).join("\n");
-    var prompt = "Вот список фактов о пользователе. Некоторые могут повторять друг друга по смыслу, "
-      + "просто сформулированы разными словами (например 'Ищет дешёвые авиабилеты' и 'Интересуется поиском дешёвых авиабилетов' — это ОДНО И ТО ЖЕ).\n"
-      + "Объедини семантические дубликаты, оставив один наиболее полный и информативный вариант формулировки для каждой группы. "
-      + "Не объединяй факты, которые лишь похожи по теме, но несут разную информацию.\n"
-      + "Верни ТОЛЬКО JSON массив строк — итоговый список фактов без дублей, без пояснений.\n\n"
-      + "СПИСОК ФАКТОВ:\n" + numbered;
-    var body = JSON.stringify({ model:"claude-haiku-4-5", max_tokens:600, messages:[{role:"user",content:prompt}] });
-    var data;
-    if(isMobile){
-      data = await proxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, body);
-    } else {
-      var resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type":"application/json", "x-api-key": keys.claude, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
-        body: body
-      });
-      data = await resp.json();
-    }
-    var text = (data.content&&data.content[0]&&data.content[0].text)||"[]";
-    text = text.replace(/```json|```/g,"").trim();
-    var cleaned = JSON.parse(text);
-    if(!Array.isArray(cleaned) || !cleaned.length){ showToast("⚠️ Не удалось очистить"); }
-    else{
-      var removed = facts.length - cleaned.length;
-      window.userMemory.facts = cleaned.map(function(t){
-        return { id: Date.now()+"_"+Math.random(), text: t, ts: Date.now(), confirmed: true };
-      });
-      persistMemory();
-      updateMemoryBadge();
-      renderFactsList();
-      showToast(removed > 0 ? "✅ Удалено дублей: " + removed : "✅ Дублей не найдено");
-    }
-  }catch(e){ showToast("❌ Ошибка очистки: " + e.message); }
-  if(btn){ btn.textContent = "🧹 Убрать дубли"; btn.disabled = false; }
-}
-
-// ── Инициализация памяти при старте ──────────────────────────
-(function initMemory(){
-  try{
-    var saved = localStorage.getItem("ai_hub_memory_v1");
-    if(saved) mergeUserMemory(JSON.parse(saved));
-  }catch(e){}
-  updateMemoryBadge();
-})();
-
-// ── Хук: автоматически извлекаем факты после каждого ответа AI ──
-// Вешаем на saveChats — он вызывается после каждого сохранения чата
-var _origSaveChats = window.saveChats;
-window.saveChats = function(chats){
-  if(_origSaveChats) _origSaveChats.apply(this, arguments);
-  // Извлекаем факты из последнего чата (throttle: раз в 2 мин)
-  var now = Date.now();
-  if(!window._lastExtract || now - window._lastExtract > 120000){
-    window._lastExtract = now;
-    var last = chats && chats[0];
-    if(last && last.messages && last.messages.length >= 2){
-      setTimeout(function(){ extractFactsFromDialog(last.messages); }, 3000);
-    }
-  }
-};
-</script>
-</body>
-</html>
+    var extractBody = JSON.stringify({ model:"claud
