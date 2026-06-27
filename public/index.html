@@ -2904,7 +2904,7 @@ function getProxyUrl(){
   return "/api/proxy";
 }
 
-async function proxyFetch(url, headers, body){
+async function proxyFetch(url, headers, body, _isRetry){
   const proxyUrl = getProxyUrl();
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 90000);
@@ -2916,7 +2916,11 @@ async function proxyFetch(url, headers, body){
       body: JSON.stringify({url, headers, body})
     });
     clearTimeout(t);
-    if(r.status === 404) throw new Error("Прокси 404: /api/proxy не найден. Проверь деплой Vercel.");
+    if(r.status === 404){
+      // Разовый сбой (например, гонка при множестве параллельных запросов) — пробуем один раз повторить
+      if(!_isRetry){ await sleep(500); return proxyFetch(url, headers, body, true); }
+      throw new Error("Прокси 404: /api/proxy не найден. Проверь деплой.");
+    }
     if(r.status === 403) throw new Error("Прокси 403: домен не разрешён.");
     const text = await r.text();
     try{ return JSON.parse(text); }
@@ -3325,6 +3329,32 @@ async function extractPdfText(b64){
 // Рендерит каждую страницу PDF как изображение и прогоняет через Tesseract OCR —
 // резервный путь для PDF без текстового слоя (отсканированные документы, дизайнерские
 // карточки-картинки). Ограничено первыми 15 страницами, чтобы не зависнуть на больших файлах.
+// Рендерит страницы PDF как JPEG-изображения (base64) — используется когда у PDF нет
+// настоящего текстового слоя (дизайнерские карточки, сканы), чтобы передать страницы
+// напрямую vision-агентам, а не только мутный OCR-текст, который плохо справляется
+// со стилизованными шрифтами, цветными фонами и многоколоночной вёрсткой.
+async function renderPdfPagesAsImages(b64, maxPages){
+  if(!window.pdfjsLib) return [];
+  try{
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc="vendor/pdf.worker.min.js";
+    const data=atob(b64); const bytes=new Uint8Array(data.length);
+    for(let i=0;i<data.length;i++) bytes[i]=data.charCodeAt(i);
+    const pdf=await window.pdfjsLib.getDocument({data:bytes}).promise;
+    const images=[];
+    const n=Math.min(pdf.numPages, maxPages||6);
+    for(let p=1;p<=n;p++){
+      const page=await pdf.getPage(p);
+      const viewport=page.getViewport({scale:1.5});
+      const canvas=document.createElement("canvas");
+      canvas.width=viewport.width; canvas.height=viewport.height;
+      const ctx=canvas.getContext("2d");
+      await page.render({canvasContext:ctx,viewport}).promise;
+      images.push(canvas.toDataURL("image/jpeg",0.82).split(",")[1]);
+    }
+    return images;
+  }catch(e){ return []; }
+}
+
 async function extractPdfTextViaOCR(pdf){
   let full="";
   const maxPages=Math.min(pdf.numPages,15);
@@ -3390,6 +3420,21 @@ function handleFiles(input){
         showToast("📄 Читаю PDF: "+f.name);
         const txt=await extractPdfText(b64);
         if(txt) obj.text=txt; showToast(txt?"✅ PDF прочитан":"⚠️ PDF: текст не извлечён");
+        // Если текстового слоя почти нет (дизайнерские карточки, сканы, картинки) — дополнительно
+        // рендерим страницы как изображения и добавляем их как обычные картинки в чат, чтобы
+        // vision-агенты (Claude, Gemini, Perplexity, GPT, Kimi) реально "увидели" контент,
+        // а не только мутный OCR-текст, который плохо справляется со стилизованным дизайном.
+        const cleanedTxt=(txt||"").replace(/--- Стр\.\d+( \(OCR\))? ---/g,"").trim();
+        if(cleanedTxt.length<50){
+          try{
+            showToast("🖼️ Рендерю страницы PDF как изображения для агентов с поддержкой зрения...");
+            const pageImages=await renderPdfPagesAsImages(b64,6);
+            pageImages.forEach((imgB64,idx)=>{
+              currentFiles.push({name:f.name+" — стр."+(idx+1),type:"image/jpeg",b64:imgB64,size:Math.round(imgB64.length*0.75),text:null});
+            });
+            if(pageImages.length) showToast("✅ Добавлено "+pageImages.length+" страниц как изображений");
+          }catch(pe){ /* тихо пропускаем, если рендер страниц не удался */ }
+        }
       } else if(f.type.startsWith("image/")){
         const sendBtn=document.getElementById("sendBtn");
         if(sendBtn){sendBtn.disabled=true;sendBtn.textContent="⏳";sendBtn.style.background="#374151";}
