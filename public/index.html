@@ -6500,4 +6500,136 @@ async function extractFactsFromDialog(messages){
     + "\n\nДИАЛОГ:\n" + dialogText;
 
   try{
-    var extractBody = JSON.stringify({ model:"claud
+    var extractBody = JSON.stringify({ model:"claude-haiku-4-5", max_tokens:300, messages:[{role:"user",content:prompt}] });
+    var data;
+    if(isMobile){
+      data = await proxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, extractBody);
+    } else {
+      var resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "x-api-key": keys.claude, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
+        body: extractBody
+      });
+      data = await resp.json();
+    }
+    var text = (data.content&&data.content[0]&&data.content[0].text)||"[]";
+    text = text.replace(/```json|```/g,"").trim();
+    var newFacts = JSON.parse(text);
+    if(!Array.isArray(newFacts) || !newFacts.length) return;
+
+    // Дедупликация — последний защитный барьер на случай, если модель всё же
+    // вернула что-то очень похожее на уже существующее (точное или почти точное совпадение).
+    // Основная дедупликация теперь происходит на уровне промпта (модель видит существующие факты).
+    var existingLower = existingFacts.map(function(f){ return f.toLowerCase().trim(); });
+    var added = [];
+    newFacts.forEach(function(factText){
+      if(typeof factText !== "string" || factText.length < 5) return;
+      var low = factText.toLowerCase().trim();
+      if(existingLower.includes(low)) return; // точное совпадение — пропускаем
+      window.userMemory.facts.push({ id: Date.now()+"_"+Math.random(), text: factText, ts: Date.now(), confirmed: true });
+      existingLower.push(low);
+      added.push(factText);
+    });
+
+    if(added.length > 0){
+      persistMemory();
+      updateMemoryBadge();
+      // Ненавязчивое уведомление
+      setTimeout(function(){
+        showToast("🧠 Запомнил: " + added[0] + (added.length > 1 ? " +" + (added.length-1) + " фактов" : ""));
+      }, 1500);
+    }
+  }catch(e){ console.warn("extractFacts error:", e); }
+}
+
+// Кнопка «Извлечь сейчас» — берём последний чат
+async function extractFactsNow(){
+  var btn = document.getElementById("extractBtn");
+  if(btn){ btn.textContent = "⏳ Извлекаю..."; btn.disabled = true; }
+  try{
+    var chatKey = typeof getChatKey === "function" ? getChatKey() : "ai_hub_chats_v4";
+    var allChats = JSON.parse(localStorage.getItem(chatKey)||"[]");
+    var messages = [];
+    allChats.slice(0,3).forEach(function(c){ if(c.messages) messages = messages.concat(c.messages.slice(-6)); });
+    await extractFactsFromDialog(messages);
+    renderFactsList();
+  }catch(e){ showToast("❌ Ошибка извлечения: " + e.message); }
+  if(btn){ btn.textContent = "🔍 Извлечь сейчас"; btn.disabled = false; }
+}
+
+// Разовая семантическая дедупликация уже сохранённых фактов через Claude Haiku.
+// Нужна для очистки фактов, накопленных до того, как извлечение стало
+// учитывать существующий список (см. extractFactsFromDialog) — например,
+// "Ищет дешёвые авиабилеты" и "Интересуется поиском дешёвых авиабилетов".
+async function dedupFactsNow(){
+  var facts = window.userMemory.facts || [];
+  if(facts.length < 2){ showToast("Недостаточно фактов для очистки"); return; }
+  var keys = getKeys ? getKeys() : {};
+  if(!keys.claude){ showToast("⚠️ Нужен ключ Claude в ⚙️ Настройки"); return; }
+  var btn = document.getElementById("dedupBtn");
+  if(btn){ btn.textContent = "⏳ Чищу..."; btn.disabled = true; }
+  try{
+    var numbered = facts.map(function(f,i){ return (i+1) + ". " + f.text; }).join("\n");
+    var prompt = "Вот список фактов о пользователе. Некоторые могут повторять друг друга по смыслу, "
+      + "просто сформулированы разными словами (например 'Ищет дешёвые авиабилеты' и 'Интересуется поиском дешёвых авиабилетов' — это ОДНО И ТО ЖЕ).\n"
+      + "Объедини семантические дубликаты, оставив один наиболее полный и информативный вариант формулировки для каждой группы. "
+      + "Не объединяй факты, которые лишь похожи по теме, но несут разную информацию.\n"
+      + "Верни ТОЛЬКО JSON массив строк — итоговый список фактов без дублей, без пояснений.\n\n"
+      + "СПИСОК ФАКТОВ:\n" + numbered;
+    var body = JSON.stringify({ model:"claude-haiku-4-5", max_tokens:600, messages:[{role:"user",content:prompt}] });
+    var data;
+    if(isMobile){
+      data = await proxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, body);
+    } else {
+      var resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "x-api-key": keys.claude, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
+        body: body
+      });
+      data = await resp.json();
+    }
+    var text = (data.content&&data.content[0]&&data.content[0].text)||"[]";
+    text = text.replace(/```json|```/g,"").trim();
+    var cleaned = JSON.parse(text);
+    if(!Array.isArray(cleaned) || !cleaned.length){ showToast("⚠️ Не удалось очистить"); }
+    else{
+      var removed = facts.length - cleaned.length;
+      window.userMemory.facts = cleaned.map(function(t){
+        return { id: Date.now()+"_"+Math.random(), text: t, ts: Date.now(), confirmed: true };
+      });
+      persistMemory();
+      updateMemoryBadge();
+      renderFactsList();
+      showToast(removed > 0 ? "✅ Удалено дублей: " + removed : "✅ Дублей не найдено");
+    }
+  }catch(e){ showToast("❌ Ошибка очистки: " + e.message); }
+  if(btn){ btn.textContent = "🧹 Убрать дубли"; btn.disabled = false; }
+}
+
+// ── Инициализация памяти при старте ──────────────────────────
+(function initMemory(){
+  try{
+    var saved = localStorage.getItem("ai_hub_memory_v1");
+    if(saved) mergeUserMemory(JSON.parse(saved));
+  }catch(e){}
+  updateMemoryBadge();
+})();
+
+// ── Хук: автоматически извлекаем факты после каждого ответа AI ──
+// Вешаем на saveChats — он вызывается после каждого сохранения чата
+var _origSaveChats = window.saveChats;
+window.saveChats = function(chats){
+  if(_origSaveChats) _origSaveChats.apply(this, arguments);
+  // Извлекаем факты из последнего чата (throttle: раз в 2 мин)
+  var now = Date.now();
+  if(!window._lastExtract || now - window._lastExtract > 120000){
+    window._lastExtract = now;
+    var last = chats && chats[0];
+    if(last && last.messages && last.messages.length >= 2){
+      setTimeout(function(){ extractFactsFromDialog(last.messages); }, 3000);
+    }
+  }
+};
+</script>
+</body>
+</html>
