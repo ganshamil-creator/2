@@ -27,4 +27,4 @@ jobs:
       - name: Deploy to Firebase
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-key.json
-       run: npx firebase-tools deploy --project ai-hub-21af9 --non-interactive --force
+        run: npx firebase-tools deploy --project ai-hub-21af9 --non-interactive --force
