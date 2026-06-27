@@ -767,6 +767,29 @@ let searchEnabled = false;
 let activeAgentIds = JSON.parse(localStorage.getItem("active_agents")||"null") || ["claude","gemini","perplexity","deepseek"];
 
 function getChat(){ return chats.find(c=>c.id===activeChatId); }
+
+// Строит "сырую" историю переписки для отправки агентам, сохраняя в ней содержимое
+// прикреплённых файлов (текст из PDF/DOCX/OCR). Раньше при сборке истории бралось
+// только u.content (сам вопрос), а извлечённый текст файлов терялся — из-за этого
+// AI "забывал" о ранее приложенном файле уже на следующем уточняющем вопросе.
+function buildRawHistoryFromChat(chat){
+  const rawHistory=[];
+  if(chat.messages){
+    for(let i=0;i<chat.messages.length;i+=2){
+      const u=chat.messages[i], a=chat.messages[i+1];
+      if(u){
+        let content=u.content||"";
+        if(u.files && u.files.length){
+          const fileTexts=u.files.filter(f=>f.text).map(f=>"\n[Файл: "+f.name+"]\n"+f.text.slice(0,6000));
+          if(fileTexts.length) content=content+"\n\n=== Ранее приложенные файлы ===\n"+fileTexts.join("\n")+"\n=== Конец файлов ===";
+        }
+        rawHistory.push({role:"user",content});
+      }
+      if(a) rawHistory.push({role:"assistant",content:a.content});
+    }
+  }
+  return rawHistory;
+}
 function getAgents(){ return ALL_AGENTS.filter(a=>activeAgentIds.includes(a.id)); }
 
 function getToday(){
@@ -3300,56 +3323,47 @@ async function synthesize(system, history){
 // ════════════════════════════════════════════════════════════════
 async function extractPdfText(b64){
   try{
-    if(!window.pdfjsLib) return null;
+    if(!window.pdfjsLib) return {text:null, emptyPages:[]};
     window.pdfjsLib.GlobalWorkerOptions.workerSrc="vendor/pdf.worker.min.js";
     const data=atob(b64); const bytes=new Uint8Array(data.length);
     for(let i=0;i<data.length;i++) bytes[i]=data.charCodeAt(i);
     const pdf=await window.pdfjsLib.getDocument({data:bytes}).promise;
     let text="";
-    let hasRealText=false;
+    const emptyPages=[]; // номера страниц БЕЗ настоящего текстового слоя (картинки/вектор/сканы)
     for(let p=1;p<=pdf.numPages;p++){
       const page=await pdf.getPage(p);
       const content=await page.getTextContent();
       const pageText=content.items.map(i=>i.str).join(" ").trim();
-      if(pageText.length>10) hasRealText=true;
-      text+="\n--- Стр."+p+" ---\n"+pageText;
+      if(pageText.length<20) emptyPages.push(p);
+      text+="\n--- Стр."+p+" ---\n"+(pageText||"[на этой странице нет текстового слоя — см. изображение страницы]");
     }
     text=text.trim();
-    // Если в PDF нет настоящего текстового слоя (сканы, картинки, дизайнерские карточки
-    // из Canva/PowerPoint/Figma) — пробуем распознать текст со страниц через OCR.
-    if(!hasRealText && window.Tesseract){
-      if(typeof showToast==="function") showToast("🔍 Текст не найден — пробую OCR по страницам PDF...");
-      const ocrText=await extractPdfTextViaOCR(pdf);
-      if(ocrText && ocrText.trim().length>15) return ocrText;
-    }
-    return text.length>15?text:null;
-  }catch(e){ return null; }
+    return {text: text.length>15?text:null, emptyPages, totalPages: pdf.numPages};
+  }catch(e){ return {text:null, emptyPages:[], totalPages:0}; }
 }
 
-// Рендерит каждую страницу PDF как изображение и прогоняет через Tesseract OCR —
-// резервный путь для PDF без текстового слоя (отсканированные документы, дизайнерские
-// карточки-картинки). Ограничено первыми 15 страницами, чтобы не зависнуть на больших файлах.
-// Рендерит страницы PDF как JPEG-изображения (base64) — используется когда у PDF нет
-// настоящего текстового слоя (дизайнерские карточки, сканы), чтобы передать страницы
-// напрямую vision-агентам, а не только мутный OCR-текст, который плохо справляется
-// со стилизованными шрифтами, цветными фонами и многоколоночной вёрсткой.
-async function renderPdfPagesAsImages(b64, maxPages){
-  if(!window.pdfjsLib) return [];
+// Рендерит КОНКРЕТНЫЕ страницы PDF как JPEG-изображения (base64) — используется для тех
+// страниц, где не нашлось текстового слоя (дизайнерские карточки, сканы, векторный текст),
+// чтобы передать именно их напрямую vision-агентам, а не угадывать текст по OCR.
+// pageNumbers — массив номеров страниц (1-based) для рендера.
+async function renderPdfPagesAsImages(b64, pageNumbers){
+  if(!window.pdfjsLib || !pageNumbers || !pageNumbers.length) return [];
   try{
     window.pdfjsLib.GlobalWorkerOptions.workerSrc="vendor/pdf.worker.min.js";
     const data=atob(b64); const bytes=new Uint8Array(data.length);
     for(let i=0;i<data.length;i++) bytes[i]=data.charCodeAt(i);
     const pdf=await window.pdfjsLib.getDocument({data:bytes}).promise;
     const images=[];
-    const n=Math.min(pdf.numPages, maxPages||6);
-    for(let p=1;p<=n;p++){
+    const pages=pageNumbers.slice(0,10); // ограничение, чтобы не зависнуть на огромных файлах
+    for(const p of pages){
+      if(p<1||p>pdf.numPages) continue;
       const page=await pdf.getPage(p);
       const viewport=page.getViewport({scale:1.5});
       const canvas=document.createElement("canvas");
       canvas.width=viewport.width; canvas.height=viewport.height;
       const ctx=canvas.getContext("2d");
       await page.render({canvasContext:ctx,viewport}).promise;
-      images.push(canvas.toDataURL("image/jpeg",0.82).split(",")[1]);
+      images.push({page:p, b64:canvas.toDataURL("image/jpeg",0.85).split(",")[1]});
     }
     return images;
   }catch(e){ return []; }
@@ -3418,21 +3432,22 @@ function handleFiles(input){
       }
       if(f.type==="application/pdf"){
         showToast("📄 Читаю PDF: "+f.name);
-        const txt=await extractPdfText(b64);
-        if(txt) obj.text=txt; showToast(txt?"✅ PDF прочитан":"⚠️ PDF: текст не извлечён");
-        // Если текстового слоя почти нет (дизайнерские карточки, сканы, картинки) — дополнительно
-        // рендерим страницы как изображения и добавляем их как обычные картинки в чат, чтобы
-        // vision-агенты (Claude, Gemini, Perplexity, GPT, Kimi) реально "увидели" контент,
-        // а не только мутный OCR-текст, который плохо справляется со стилизованным дизайном.
-        const cleanedTxt=(txt||"").replace(/--- Стр\.\d+( \(OCR\))? ---/g,"").trim();
-        if(cleanedTxt.length<50){
+        const pdfResult=await extractPdfText(b64);
+        const txt=pdfResult.text;
+        if(txt) obj.text=txt;
+        showToast(txt?"✅ PDF прочитан":"⚠️ PDF: текст не извлечён");
+        // Постранично: если на КОНКРЕТНЫХ страницах не нашлось текстового слоя (дизайнерские
+        // карточки, сканы, векторный текст) — рендерим именно ИХ как изображения и добавляем
+        // в чат как обычные картинки, чтобы vision-агенты реально "увидели" эти страницы,
+        // а не только текст с тех страниц, где извлечение сработало нормально.
+        if(pdfResult.emptyPages && pdfResult.emptyPages.length){
           try{
-            showToast("🖼️ Рендерю страницы PDF как изображения для агентов с поддержкой зрения...");
-            const pageImages=await renderPdfPagesAsImages(b64,6);
-            pageImages.forEach((imgB64,idx)=>{
-              currentFiles.push({name:f.name+" — стр."+(idx+1),type:"image/jpeg",b64:imgB64,size:Math.round(imgB64.length*0.75),text:null});
+            showToast("🖼️ Стр. "+pdfResult.emptyPages.join(", ")+" без текста — рендерю как изображения...");
+            const pageImages=await renderPdfPagesAsImages(b64,pdfResult.emptyPages);
+            pageImages.forEach((img)=>{
+              currentFiles.push({name:f.name+" — стр."+img.page,type:"image/jpeg",b64:img.b64,size:Math.round(img.b64.length*0.75),text:null});
             });
-            if(pageImages.length) showToast("✅ Добавлено "+pageImages.length+" страниц как изображений");
+            if(pageImages.length) showToast("✅ Добавлено "+pageImages.length+" страниц как изображений (стр. "+pageImages.map(i=>i.page).join(", ")+")");
           }catch(pe){ /* тихо пропускаем, если рендер страниц не удался */ }
         }
       } else if(f.type.startsWith("image/")){
@@ -4049,14 +4064,7 @@ async function sendQuick(text, inp){
   const today=getToday();
   const chat=getChat();
 
-  const rawHistory=[];
-  if(chat.messages){
-    for(let i=0;i<chat.messages.length;i+=2){
-      const u=chat.messages[i],a=chat.messages[i+1];
-      if(u) rawHistory.push({role:"user",content:u.content});
-      if(a) rawHistory.push({role:"assistant",content:a.content});
-    }
-  }
+  const rawHistory=buildRawHistoryFromChat(chat);
   const history = await getManagedHistory(chat, rawHistory);
 
   // File context
@@ -4181,14 +4189,7 @@ async function sendFirst(){
   }
   const enrichedMsg=(fileCtx?fileCtx+"\n":"")+today+text;
 
-  const rawHistory=[];
-  if(chat.messages){
-    for(let i=0;i<chat.messages.length;i+=2){
-      const u=chat.messages[i],a=chat.messages[i+1];
-      if(u)rawHistory.push({role:"user",content:u.content});
-      if(a)rawHistory.push({role:"assistant",content:a.content});
-    }
-  }
+  const rawHistory=buildRawHistoryFromChat(chat);
   const history = await getManagedHistory(chat, rawHistory);
   history.push({role:"user",content:enrichedMsg});
 
@@ -4294,14 +4295,7 @@ async function sendChain(text, inp){
   const enrichedMsg=(fileCtx?fileCtx+"\n":"")+today+text;
 
   // Build history
-  const rawHistory=[];
-  if(chat.messages){
-    for(let i=0;i<chat.messages.length;i+=2){
-      const u=chat.messages[i],a=chat.messages[i+1];
-      if(u)rawHistory.push({role:"user",content:u.content});
-      if(a)rawHistory.push({role:"assistant",content:a.content});
-    }
-  }
+  const rawHistory=buildRawHistoryFromChat(chat);
   const history = await getManagedHistory(chat, rawHistory);
   history.push({role:"user",content:enrichedMsg});
 
@@ -4548,14 +4542,7 @@ async function send(){
   if(!agents.length){alert("Нет активных агентов");return;}
 
   // Build history — полная история разговора
-  const rawHistory=[];
-  if(chat.messages){
-    for(let i=0;i<chat.messages.length;i+=2){
-      const u=chat.messages[i], a=chat.messages[i+1];
-      if(u) rawHistory.push({role:"user",content:u.content});
-      if(a) rawHistory.push({role:"assistant",content:a.content});
-    }
-  }
+  const rawHistory=buildRawHistoryFromChat(chat);
   // Если история длинная — старая часть сжимается в резюме через Haiku, экономя токены
   const history = await getManagedHistory(chat, rawHistory);
 
