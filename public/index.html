@@ -4305,12 +4305,15 @@ async function sendChain(text, inp){
   }
 
   // ── РАУНД 1 — независимые первичные позиции, параллельно ──
+  // Текст вопроса + содержимое файлов (PDF/DOCX/изображения с OCR) — без этого
+  // агенты в раунде 1 не видели прикреплённые файлы вообще.
+  const textForRound1 = text + (fileCtx ? "\n"+fileCtx.slice(0,12000) : "");
   const round1={};
   await Promise.all(agents.map(async a=>{
     const el0=document.getElementById(turnId+"_"+a.id+"_text");
     if(el0) el0.innerHTML='<div style="font-size:10px;color:#3b82f6;margin-bottom:4px">1️⃣ Раунд 1 — первичная позиция</div><span class="pulse">Думает...</span>';
     try{
-      const h=makeVisionHistoryFor(a, history, text);
+      const h=makeVisionHistoryFor(a, history, textForRound1);
       const ans=await callAgent(a,today+a.system,h,(partial)=>{
         const el=document.getElementById(turnId+"_"+a.id+"_text");
         if(el){el.innerHTML='<div style="font-size:10px;color:#3b82f6;margin-bottom:4px">1️⃣ Раунд 1 — первичная позиция</div>'+renderMd(partial);scrollToBottom();}
