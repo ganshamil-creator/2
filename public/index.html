@@ -3302,13 +3302,46 @@ async function extractPdfText(b64){
     for(let i=0;i<data.length;i++) bytes[i]=data.charCodeAt(i);
     const pdf=await window.pdfjsLib.getDocument({data:bytes}).promise;
     let text="";
+    let hasRealText=false;
     for(let p=1;p<=pdf.numPages;p++){
       const page=await pdf.getPage(p);
       const content=await page.getTextContent();
-      text+="\n--- Стр."+p+" ---\n"+content.items.map(i=>i.str).join(" ");
+      const pageText=content.items.map(i=>i.str).join(" ").trim();
+      if(pageText.length>10) hasRealText=true;
+      text+="\n--- Стр."+p+" ---\n"+pageText;
     }
-    return text.trim();
+    text=text.trim();
+    // Если в PDF нет настоящего текстового слоя (сканы, картинки, дизайнерские карточки
+    // из Canva/PowerPoint/Figma) — пробуем распознать текст со страниц через OCR.
+    if(!hasRealText && window.Tesseract){
+      if(typeof showToast==="function") showToast("🔍 Текст не найден — пробую OCR по страницам PDF...");
+      const ocrText=await extractPdfTextViaOCR(pdf);
+      if(ocrText && ocrText.trim().length>15) return ocrText;
+    }
+    return text.length>15?text:null;
   }catch(e){ return null; }
+}
+
+// Рендерит каждую страницу PDF как изображение и прогоняет через Tesseract OCR —
+// резервный путь для PDF без текстового слоя (отсканированные документы, дизайнерские
+// карточки-картинки). Ограничено первыми 15 страницами, чтобы не зависнуть на больших файлах.
+async function extractPdfTextViaOCR(pdf){
+  let full="";
+  const maxPages=Math.min(pdf.numPages,15);
+  for(let p=1;p<=maxPages;p++){
+    try{
+      const page=await pdf.getPage(p);
+      const viewport=page.getViewport({scale:2});
+      const canvas=document.createElement("canvas");
+      canvas.width=viewport.width; canvas.height=viewport.height;
+      const ctx=canvas.getContext("2d");
+      await page.render({canvasContext:ctx,viewport}).promise;
+      const result=await Tesseract.recognize(canvas,"rus+eng",{});
+      const txt=(result.data.text||"").trim();
+      if(txt) full+="\n--- Стр."+p+" (OCR) ---\n"+txt;
+    }catch(pe){ /* пропускаем проблемную страницу, продолжаем остальные */ }
+  }
+  return full.trim();
 }
 
 async function extractImageTextOCR(b64, mimeType){
@@ -3512,10 +3545,18 @@ async function extractPdfTextFromDataUrl(dataUrl){
     }
     var pdf = await window.pdfjsLib.getDocument({data:bytes}).promise;
     var text = "";
+    var hasRealText = false;
     for(var p=1;p<=Math.min(pdf.numPages,10);p++){
       var page = await pdf.getPage(p);
       var content = await page.getTextContent();
-      text = text + content.items.map(function(item){return item.str||"";}).join(" ") + "\n";
+      var pageText = content.items.map(function(item){return item.str||"";}).join(" ");
+      if(pageText.trim().length>10) hasRealText = true;
+      text = text + pageText + "\n";
+    }
+    if(!hasRealText && window.Tesseract){
+      if(typeof showToast==="function") showToast("🔍 Текст не найден — пробую OCR по страницам PDF...");
+      var ocrText = await extractPdfTextViaOCR(pdf);
+      if(ocrText && ocrText.trim().length>15) return ocrText;
     }
     return text;
   }catch(e){ return ""; }
