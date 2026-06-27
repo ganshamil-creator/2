@@ -48,7 +48,13 @@ const ALLOWED_HOSTS = [
 ];
 
 exports.proxy = onRequest(
-  { cors: true, region: "us-central1", invoker: "public" },
+  {
+    cors: true,
+    region: "us-central1",
+    invoker: "public",
+    timeoutSeconds: 180,
+    memory: "256MiB"
+  },
   async (req, res) => {
     setCors(res);
 
@@ -171,7 +177,7 @@ function mergeByDate(existing, incoming) {
 }
 
 exports.samsungWebhook = onRequest(
-  { region: "us-central1", invoker: "public" },
+  { region: "us-central1", invoker: "public", timeoutSeconds: 60, memory: "256MiB" },
   async (req, res) => {
     setCors(res);
 
