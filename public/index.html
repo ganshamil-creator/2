@@ -813,8 +813,8 @@ const ALL_AGENTS = [
    system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста."},
   {id:"kimi",      name:"Kimi",       emoji:"🔵", color:"#3b82f6", badge:"128k",
    system:"Ты Kimi от Moonshot AI. Специализируешься на креативных задачах, финансовых расчётах и анализе длинных документов. Давай нестандартные практичные решения. Если есть контекст от предыдущих агентов — используй его и дополни своим уникальным взглядом. Используй дату из контекста."},
-  {id:"gpt",       name:"GPT-4o",     emoji:"🟢", color:"#10a779", badge:"4o",
-   system:"Ты GPT-4o от OpenAI. Давай практичные пошаговые решения и конкретные рекомендации. Специализируешься на прикладных задачах, инструкциях и советах. Если есть контекст от предыдущих агентов — обогати его практическими советами. Используй дату из контекста."},
+  {id:"gpt",       name:"GPT-5.4",     emoji:"🟢", color:"#10a779", badge:"5.4 mini",
+   system:"Ты GPT-5.4 от OpenAI. Давай практичные пошаговые решения и конкретные рекомендации. Специализируешься на прикладных задачах, инструкциях и советах. Если есть контекст от предыдущих агентов — обогати его практическими советами. Используй дату из контекста."},
 ];
 
 // ════════════════════════════════════════════════════════════════
@@ -2959,7 +2959,7 @@ const isMobile = /Android|iPhone|iPad|iPod|Mobile|SamsungBrowser/i.test(navigato
 
 async function callOpenAI(key, system, history){
   return callWithRetry(async()=>{
-    const body=JSON.stringify({model:"gpt-4o",max_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
+    const body=JSON.stringify({model:"gpt-5.4-mini",max_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
     let d;
     if(isMobile){
       d=await proxyFetch("https://api.openai.com/v1/chat/completions",{"Authorization":"Bearer "+key},body);
@@ -2983,8 +2983,8 @@ function pickClaudeModel(history){
   const text=(Array.isArray(last?.content)?last.content.find(c=>c.type==="text")?.text||"":last?.content||"").toLowerCase();
   const heavy=["слайд","presentation","презентац","подробно","детально","анализ","стратег","бизнес план","эссе","реферат","диплом","промпт","перевед","translate","summarize","сравни","сравнение"];
   const hasFile=history.some(m=>Array.isArray(m.content)&&m.content.some(c=>c.type==="image"||c.type==="document"));
-  if(hasFile||heavy.some(k=>text.includes(k))||text.length>400) return "claude-haiku-4-5";
-  return "claude-haiku-4-5"; // Haiku быстрее для всех — Sonnet только если явно нужен
+  if(hasFile||heavy.some(k=>text.includes(k))||text.length>400) return "claude-sonnet-4-6";
+  return "claude-haiku-4-5"; // Haiku — для простых быстрых запросов, Sonnet — для сложных/файлов
 }
 
 async function callClaude(key, system, history, onChunk){
@@ -3044,7 +3044,7 @@ async function callKimi(key, system, history){
   return callWithRetry(async()=>{
     // Если в истории есть изображения — используем мультимодальную модель kimi-k2.6
     const hasImages=history.some(m=>Array.isArray(m.content)&&m.content.some(c=>c.type==="image_url"));
-    const model=hasImages?"kimi-k2.6":"moonshot-v1-128k";
+    const model="kimi-k2.6";
     const kimiBody=JSON.stringify({model,max_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
     let d;
     // Kimi требует прокси на всех устройствах (CORS + геоограничения)
@@ -3060,12 +3060,13 @@ async function callKimi(key, system, history){
 }
 
 async function callGemini(key, system, history){
-  // Таймаут зависит от модели: 2.5-flash медленнее — 150s, остальные — 60-90s
+  // Таймаут зависит от модели. Старые модели (1.5, 2.0-flash, 2.0-flash-exp) отключены
+  // Google в 2026 году — любой запрос к ним вернёт 404, поэтому используем актуальные.
   const models=[
-    {name:"gemini-2.0-flash-exp",   timeout:90000},
-    {name:"gemini-2.0-flash",       timeout:90000},
-    {name:"gemini-2.5-flash",       timeout:150000},
-    {name:"gemini-1.5-pro",         timeout:120000},
+    {name:"gemini-2.5-flash",       timeout:90000},
+    {name:"gemini-3.5-flash",       timeout:90000},
+    {name:"gemini-2.5-pro",         timeout:150000},
+    {name:"gemini-2.5-flash-lite",  timeout:60000},
   ];
   let lastErr=null;
   for(let mi=0;mi<models.length;mi++){
@@ -3172,7 +3173,7 @@ async function callDeepSeek(key, system, history, onChunk){
       return m;
     });
     const stream=!isMobile;
-    const dsBody=JSON.stringify({model:"deepseek-chat",max_tokens:calcTokens(msgs),stream,messages:[{role:"system",content:system},...msgs]});
+    const dsBody=JSON.stringify({model:"deepseek-v4-flash",max_tokens:calcTokens(msgs),stream,messages:[{role:"system",content:system},...msgs]});
     if(isMobile){
       const d=await proxyFetch("https://api.deepseek.com/chat/completions",{"Authorization":"Bearer "+key},dsBody);
       if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
@@ -4122,7 +4123,12 @@ async function sendQuick(text, inp){
   // В health режиме ограничиваем размер контекста для быстрого ответа
   const maxFileCtx = healthMode ? 3000 : fileCtx.length;
   const trimmedFileCtx = fileCtx.slice(0, maxFileCtx);
-  const enrichedMsg=today+text+trimmedFileCtx+crossCtx;
+  let searchCtxQuick="";
+  if(searchEnabled&&text){
+    showToast("🌐 Поиск...");
+    searchCtxQuick=await tavilySearch(text);
+  }
+  const enrichedMsg=today+text+searchCtxQuick+trimmedFileCtx+crossCtx;
   history.push({role:"user",content:enrichedMsg});
 
   // Vision history
@@ -4223,7 +4229,12 @@ async function sendFirst(){
     fileCtx+="\n[Изображений: "+imageFiles.length+"]\n";
     for(const f of imageFiles){if(f.text)fileCtx+=f.text+"\n";}
   }
-  const enrichedMsg=(fileCtx?fileCtx+"\n":"")+today+text;
+  let searchCtxFirst="";
+  if(searchEnabled&&text){
+    showToast("🌐 Поиск...");
+    searchCtxFirst=await tavilySearch(text);
+  }
+  const enrichedMsg=(fileCtx?fileCtx+"\n":"")+today+text+searchCtxFirst;
 
   const rawHistory=buildRawHistoryFromChat(chat);
   const history = await getManagedHistory(chat, rawHistory);
@@ -4380,9 +4391,16 @@ async function sendChain(text, inp){
   }
 
   // ── РАУНД 1 — независимые первичные позиции, параллельно ──
-  // Текст вопроса + содержимое файлов (PDF/DOCX/изображения с OCR) — без этого
-  // агенты в раунде 1 не видели прикреплённые файлы вообще.
-  const textForRound1 = text + (fileCtx ? "\n"+fileCtx.slice(0,12000) : "");
+  // Текст вопроса + содержимое файлов (PDF/DOCX/изображения с OCR) + результаты веб-поиска
+  // (если включён тумблер поиска) — раньше веб-поиск был только в обычном режиме, поэтому
+  // в дебатах агенты (кроме Perplexity со встроенным поиском) не видели актуальные курсы,
+  // новости и любую другую свежую информацию из интернета.
+  let searchCtxChain="";
+  if(searchEnabled&&text){
+    showToast("🌐 Поиск...");
+    searchCtxChain=await tavilySearch(text);
+  }
+  const textForRound1 = text + searchCtxChain + (fileCtx ? "\n"+fileCtx.slice(0,12000) : "");
   const round1={};
   await Promise.all(agents.map(async a=>{
     const el0=document.getElementById(turnId+"_"+a.id+"_text");
@@ -4628,7 +4646,7 @@ async function send(){
     if(needTranslation){
       taskInstruction="\n\nЗАДАНИЕ: 1) Прочитай весь текст на изображении 2) Переведи его на запрошенный язык 3) Покажи оба варианта — оригинал и перевод.";
     } else {
-      taskInstruction="\n\nЗАДАНИЕ: Внимательно прочитай изображение и ответь на вопрос пользователя на основе его содержимого. Если на изображении есть текст — процитируй его.";
+      taskInstruction="\n\nЗАДАНИЕ: Внимательно прочитай изображение и ответь на вопрос пользователя на основе его содержимого. Если на изображении есть текст — процитируй его. Если это медицинский документ — пользователь делится им для собственного понимания содержимого, а не для замены консультации врача; помоги разобраться в тексте по существу (что написано, как это можно понимать) и порекомендуй уточнить детали у лечащего врача — отказываться от самого анализа текста не нужно.";
     }
   } else if(otherFiles.length>0 && needTranslation){
     taskInstruction="\n\nЗАДАНИЕ: Переведи весь текст из файла на запрошенный язык. Сохрани форматирование. Переводи полностью, не сокращай.";
