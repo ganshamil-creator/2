@@ -44,6 +44,7 @@ const ALLOWED_HOSTS = [
   "api.perplexity.ai",
   "api.moonshot.ai",
   "api.moonshot.cn",
+  "api.kimi.ai",
   "api.deepseek.com"
 ];
 
