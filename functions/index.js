@@ -45,6 +45,7 @@ const ALLOWED_HOSTS = [
   "api.moonshot.ai",
   "api.moonshot.cn",
   "api.kimi.ai",
+  "api.kimi.com",
   "api.deepseek.com"
 ];
 
@@ -54,7 +55,9 @@ exports.proxy = onRequest(
     region: "us-central1",
     invoker: "public",
     timeoutSeconds: 180,
-    memory: "256MiB"
+    memory: "512MiB",
+    concurrency: 1,
+    cpu: 1
   },
   async (req, res) => {
     setCors(res);
