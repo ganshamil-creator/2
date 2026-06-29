@@ -2922,15 +2922,18 @@ function calcTokens(history){
 
 // ── Proxy helper (для мобильных) ──────────────────────────────
 function getProxyUrl(){
-  // Всегда используем /api/proxy (Vercel serverless).
-  // Netlify здесь не используется — убрали ветку, чтобы не ломать мобильные.
-  return "/api/proxy";
+  // ВАЖНО: обращаемся к Cloud Function напрямую, а не через /api/proxy (Hosting rewrite).
+  // У Firebase Hosting есть жёсткий лимит 60 секунд на запросы через rewrite — он обрывает
+  // соединение, даже если у самой функции настроен куда более долгий timeoutSeconds (у нас 180с).
+  // Перплексити (Sonar Pro со встроенным поиском) и другие медленные ответы упирались в этот
+  // потолок раньше времени. Прямой адрес функции этому лимиту не подчиняется (до 3600с).
+  return "https://us-central1-ai-hub-21af9.cloudfunctions.net/proxy";
 }
 
 async function proxyFetch(url, headers, body){
   const proxyUrl = getProxyUrl();
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 90000);
+  const t = setTimeout(() => ctrl.abort(), 150000);
   try {
     const r = await fetch(proxyUrl, {
       method: "POST",
@@ -2950,7 +2953,7 @@ async function proxyFetch(url, headers, body){
     catch(e){ throw new Error("Прокси вернул не JSON (HTTP "+r.status+"): "+text.slice(0,150)); }
   } catch(e) {
     clearTimeout(t);
-    if(e.name === "AbortError") throw new Error("Прокси: таймаут 90с (network timeout)");
+    if(e.name === "AbortError") throw new Error("Прокси: таймаут 150с (network timeout)");
     throw e;
   }
 }
