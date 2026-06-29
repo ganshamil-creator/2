@@ -294,12 +294,38 @@
       }
       const cloudChats = await window.cloudSync.loadChats();
       if(cloudChats !== null){
-        // Облако вернуло массив (даже пустой) — это источник правды
-        // Локальные темы игнорируем полностью, берём только облако
-        localStorage.setItem("ai_hub_chats_v4", JSON.stringify(cloudChats));
+        // Защита от гонки: если пользователь успел создать тему / отправить сообщение
+        // ДО того, как эта загрузка завершилась (например, сразу после деплоя, пока страница
+        // только открылась) — такая тема сохранилась только локально (userId ещё не был
+        // готов) и потерялась бы при обычной перезаписи. Сливаем облако с локальными темами,
+        // у которых есть реальные сообщения, проверяя tombstone-список, чтобы не воскресить
+        // то, что было удалено на другом устройстве.
+        let merged = cloudChats;
+        try{
+          const localNow = JSON.parse(localStorage.getItem(getChatKey())||"[]");
+          const cloudIds = new Set(cloudChats.map(c=>c.id));
+          const deletedIds = new Set(await window.cloudSync.getDeletedIds());
+          const localOnly = localNow.filter(c=>
+            !cloudIds.has(c.id) && !deletedIds.has(c.id) && c.messages && c.messages.length>0
+          );
+          if(localOnly.length>0){
+            merged = [...localOnly, ...cloudChats];
+            merged.sort((a,b)=>(b.messages?.[0]?.ts||0)-(a.messages?.[0]?.ts||0));
+            // Сразу отправляем домерженные темы в облако, чтобы не потерять их при следующей загрузке
+            if(window.cloudSync.userId) window.cloudSync.saveChats(localOnly).catch(()=>{});
+          }
+        }catch(mergeErr){ console.warn("Chat merge guard error:", mergeErr); }
+        // Подчищаем уже накопившиеся в облаке пустые темы (без единого сообщения) —
+        // раньше они никогда не удалялись из Firestore и появлялись на каждой загрузке.
+        const emptyOnes = merged.filter(c=>!c.messages || c.messages.length===0);
+        if(emptyOnes.length>0 && window.cloudSync.userId){
+          emptyOnes.forEach(c=>window.cloudSync.deleteChat(c.id).catch(()=>{}));
+        }
+        merged = merged.filter(c=>c.messages && c.messages.length>0);
+        localStorage.setItem("ai_hub_chats_v4", JSON.stringify(merged));
         window._reloadChats && window._reloadChats();
-        if(cloudChats.length>0){
-          showToast("✅ Синхронизировано: "+cloudChats.length+" тем");
+        if(merged.length>0){
+          showToast("✅ Синхронизировано: "+merged.length+" тем");
         } else {
           showToast("☁️ История пуста — начни новый чат!");
         }
@@ -340,8 +366,10 @@
     setInterval(async()=>{
       if(!window.cloudSync?.userId) return;
       const chats = JSON.parse(localStorage.getItem("ai_hub_chats_v4")||"[]");
-      // Только сохраняем — не мержим с облаком, чтобы не воскрешать удалённые темы
-      if(chats.length>0) await window.cloudSync.saveChats(chats);
+      // Только сохраняем — не мержим с облаком, чтобы не воскрешать удалённые темы.
+      // Пустые темы (без сообщений) не отправляем — иначе они копятся в облаке навсегда.
+      const withMessages = chats.filter(c=>c.messages && c.messages.length>0);
+      if(withMessages.length>0) await window.cloudSync.saveChats(withMessages);
     }, 60000);
   } catch(globalFirebaseErr) {
     console.error("Firebase init error:", globalFirebaseErr);
@@ -752,7 +780,13 @@ function loadChats(){
 }
 function saveChats(c){
   try{ localStorage.setItem(getChatKey(),JSON.stringify(c)); }catch{}
-  if(!healthMode && window.cloudSync) window.cloudSync.saveChats(c).catch(()=>{});
+  // В облако отправляем только темы с реальными сообщениями — иначе пустые "Новая тема"
+  // (созданные автоматически при старте/удалении последнего чата) копятся в облаке
+  // навсегда: локальная очистка cleanupEmptyChats() никогда не удаляла их из Firestore.
+  if(!healthMode && window.cloudSync){
+    const withMessages = c.filter(ch=>ch.messages && ch.messages.length>0);
+    if(withMessages.length>0) window.cloudSync.saveChats(withMessages).catch(()=>{});
+  }
 }
 function makeChat(){ return {id:Date.now()+"_"+Math.random().toString(36).slice(2),title:"Новая тема",messages:[]}; }
 function getKeys(){ return JSON.parse(localStorage.getItem("ai_hub_keys_v2")||"{}"); }
