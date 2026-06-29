@@ -3045,23 +3045,31 @@ async function callClaude(key, system, history, onChunk){
 
 async function callKimi(key, system, history){
   return callWithRetry(async()=>{
-    // kimi-k2.7-code — новая модель, специализированная под код/разработку (выбор пользователя).
-    // Она не поддерживает изображения, поэтому при наличии картинок в истории используем k2.6.
+    // Защита: если в само поле ключа случайно попало "Bearer ..." (например, при копировании
+    // из примера curl) — убираем этот префикс, иначе заголовок получится "Bearer Bearer sk-..."
+    // и API вернёт Invalid Authentication даже с правильным ключом.
+    const cleanKey=key.replace(/^Bearer\s+/i,"").trim();
     const hasImages=history.some(m=>Array.isArray(m.content)&&m.content.some(c=>c.type==="image_url"));
-    const model=hasImages?"kimi-k2.6":"kimi-k2.7-code";
-    const kimiBody=JSON.stringify({model,max_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
-    // Пробуем несколько эндпоинтов по очереди. Важно: проверяем d.error явно после каждой
-    // попытки — proxyFetch не бросает исключение на JSON-ответы с ошибкой (например, 401
-    // Invalid Authentication), поэтому простой try/catch не переключался бы на следующий адрес.
-    const endpoints=[
-      "https://api.moonshot.ai/v1/chat/completions",
-      "https://api.kimi.ai/v1/chat/completions",
-      "https://api.moonshot.cn/v1/chat/completions"
+    // ВАЖНО: у Kimi два РАЗНЫХ продукта с несовместимыми ключами/адресами —
+    // "Kimi Open Platform" (api.moonshot.ai/.cn, api.kimi.ai) и отдельный "Kimi Code"
+    // (api.kimi.com/coding/v1) — именно там живут модели вида *-code, включая k2.7-code.
+    // Ключ от одного продукта не работает с адресом другого — отсюда Invalid Authentication
+    // даже с правильным свежим ключом. Пробуем сначала Kimi Code с k2.7-code (если нет картинок),
+    // и если не получилось — надёжно откатываемся на обычный Open Platform с k2.6.
+    const attempts=hasImages ? [] : [
+      {url:"https://api.kimi.com/coding/v1/chat/completions", model:"kimi-k2.7-code"},
+      {url:"https://api.kimi.com/coding/v1/chat/completions", model:"kimi-k2-7-code"}
     ];
+    attempts.push(
+      {url:"https://api.moonshot.ai/v1/chat/completions", model:"kimi-k2.6"},
+      {url:"https://api.kimi.ai/v1/chat/completions",     model:"kimi-k2.6"},
+      {url:"https://api.moonshot.cn/v1/chat/completions", model:"kimi-k2.6"}
+    );
     let d=null, lastErr=null;
-    for(const url of endpoints){
+    for(const {url,model} of attempts){
+      const kimiBody=JSON.stringify({model,max_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
       try{
-        const resp=await proxyFetch(url,{"Authorization":"Bearer "+key},kimiBody);
+        const resp=await proxyFetch(url,{"Authorization":"Bearer "+cleanKey},kimiBody);
         if(resp && !resp.error){ d=resp; break; }
         lastErr=(resp&&resp.error&&(resp.error.message||JSON.stringify(resp.error)))||"Неизвестная ошибка";
       }catch(e){ lastErr=e.message; }
@@ -6112,14 +6120,17 @@ function showSettings(){
 function hideSettings(){ document.getElementById("settingsModal").style.display="none"; }
 
 function saveSettings(){
+  // Защита: если случайно скопирован весь заголовок ("Bearer sk-...") вместо самого ключа —
+  // убираем префикс Bearer/bearer, иначе он задублируется при формировании Authorization-заголовка.
+  function cleanKey(v){ return v.trim().replace(/^bearer\s+/i,""); }
   const newKeys = {
-    claude:document.getElementById("key_claude").value.trim(),
-    gemini:document.getElementById("key_gemini").value.trim(),
-    perplexity:document.getElementById("key_perplexity").value.trim(),
-    deepseek:document.getElementById("key_deepseek").value.trim(),
-    tavily:document.getElementById("key_tavily").value.trim(),
-    kimi:document.getElementById("key_kimi").value.trim(),
-    gpt:document.getElementById("key_gpt").value.trim(),
+    claude:cleanKey(document.getElementById("key_claude").value),
+    gemini:cleanKey(document.getElementById("key_gemini").value),
+    perplexity:cleanKey(document.getElementById("key_perplexity").value),
+    deepseek:cleanKey(document.getElementById("key_deepseek").value),
+    tavily:cleanKey(document.getElementById("key_tavily").value),
+    kimi:cleanKey(document.getElementById("key_kimi").value),
+    gpt:cleanKey(document.getElementById("key_gpt").value),
   };
   saveKeys(newKeys);
   // Автоматически включаем агентов если введён ключ
