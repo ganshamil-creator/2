@@ -407,7 +407,7 @@
       <div>🔴 <b style="color:#f87171">Gemini</b> — <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#60a5fa">aistudio.google.com/apikey</a> → <b style="color:#4ade80">Бесплатно</b></div>
       <div>🟣 <b style="color:#c084fc">Perplexity</b> — <a href="https://www.perplexity.ai/settings/api" target="_blank" style="color:#60a5fa">perplexity.ai/settings/api</a></div>
       <div>⚡ <b style="color:#22d3ee">DeepSeek</b> — <a href="https://platform.deepseek.com/api_keys" target="_blank" style="color:#60a5fa">platform.deepseek.com</a> → <b style="color:#4ade80">Очень дёшево</b></div>
-      <div>🔵 <b style="color:#60a5fa">Kimi</b> — <a href="https://platform.moonshot.cn" target="_blank" style="color:#60a5fa">platform.moonshot.cn</a> → API Keys</div>
+      <div>🔵 <b style="color:#60a5fa">Kimi</b> — <a href="https://platform.kimi.ai" target="_blank" style="color:#60a5fa">platform.kimi.ai</a> → API Keys</div>
       <div>🌐 <b style="color:#4ade80">Tavily</b> — <a href="https://app.tavily.com" target="_blank" style="color:#60a5fa">app.tavily.com</a> → 1000 поисков/мес бесплатно</div>
     </div>
 
@@ -460,7 +460,7 @@
           <span style="font-size:9px;background:#dcfce7;color:#166534;padding:1px 6px;border-radius:3px;margin-left:auto">Креатив + Финансы</span>
         </div>
         <input type="password" id="key_kimi" placeholder="sk-..." style="width:100%;padding:7px 10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;color:#1e293b;font-size:12px"/>
-        <div style="font-size:10px;color:#6b7280;margin-top:4px">platform.moonshot.cn → API Keys</div>
+        <div style="font-size:10px;color:#6b7280;margin-top:4px">platform.kimi.ai → API Keys</div>
       </div>
 
       <!-- GPT-4o -->
@@ -809,9 +809,9 @@ const ALL_AGENTS = [
    system:"Ты Google Gemini. Анализируй глубоко. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём и процитируй его в ответе. Умеешь точно переводить между любыми языками. Используй дату из контекста. Если есть данные поиска — используй их."},
   {id:"perplexity",name:"Perplexity", emoji:"🟣", color:"#8b5cf6", badge:"Sonar Pro",
    system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."},
-  {id:"deepseek",  name:"DeepSeek",   emoji:"⚡", color:"#06b6d4", badge:"V3",
+  {id:"deepseek",  name:"DeepSeek",   emoji:"⚡", color:"#06b6d4", badge:"V4",
    system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста."},
-  {id:"kimi",      name:"Kimi",       emoji:"🔵", color:"#3b82f6", badge:"128k",
+  {id:"kimi",      name:"Kimi",       emoji:"🔵", color:"#3b82f6", badge:"K2.7 Code",
    system:"Ты Kimi от Moonshot AI. Специализируешься на креативных задачах, финансовых расчётах и анализе длинных документов. Давай нестандартные практичные решения. Если есть контекст от предыдущих агентов — используй его и дополни своим уникальным взглядом. Используй дату из контекста."},
   {id:"gpt",       name:"GPT-5.4",     emoji:"🟢", color:"#10a779", badge:"5.4 mini",
    system:"Ты GPT-5.4 от OpenAI. Давай практичные пошаговые решения и конкретные рекомендации. Специализируешься на прикладных задачах, инструкциях и советах. Если есть контекст от предыдущих агентов — обогати его практическими советами. Используй дату из контекста."},
@@ -2959,7 +2959,7 @@ const isMobile = /Android|iPhone|iPad|iPod|Mobile|SamsungBrowser/i.test(navigato
 
 async function callOpenAI(key, system, history){
   return callWithRetry(async()=>{
-    const body=JSON.stringify({model:"gpt-5.4-mini",max_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
+    const body=JSON.stringify({model:"gpt-5.4-mini",max_completion_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
     let d;
     if(isMobile){
       d=await proxyFetch("https://api.openai.com/v1/chat/completions",{"Authorization":"Bearer "+key},body);
@@ -3042,19 +3042,28 @@ async function callClaude(key, system, history, onChunk){
 
 async function callKimi(key, system, history){
   return callWithRetry(async()=>{
-    // Если в истории есть изображения — используем мультимодальную модель kimi-k2.6
+    // kimi-k2.7-code — новая модель, специализированная под код/разработку (выбор пользователя).
+    // Она не поддерживает изображения, поэтому при наличии картинок в истории используем k2.6.
     const hasImages=history.some(m=>Array.isArray(m.content)&&m.content.some(c=>c.type==="image_url"));
-    const model="kimi-k2.6";
+    const model=hasImages?"kimi-k2.6":"kimi-k2.7-code";
     const kimiBody=JSON.stringify({model,max_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
-    let d;
-    // Kimi требует прокси на всех устройствах (CORS + геоограничения)
-    // Пробуем оба endpoint — .ai для международных ключей, .cn для китайских
-    try {
-      d=await proxyFetch("https://api.moonshot.ai/v1/chat/completions",{"Authorization":"Bearer "+key},kimiBody);
-    } catch(e1) {
-      d=await proxyFetch("https://api.moonshot.cn/v1/chat/completions",{"Authorization":"Bearer "+key},kimiBody);
+    // Пробуем несколько эндпоинтов по очереди. Важно: проверяем d.error явно после каждой
+    // попытки — proxyFetch не бросает исключение на JSON-ответы с ошибкой (например, 401
+    // Invalid Authentication), поэтому простой try/catch не переключался бы на следующий адрес.
+    const endpoints=[
+      "https://api.moonshot.ai/v1/chat/completions",
+      "https://api.kimi.ai/v1/chat/completions",
+      "https://api.moonshot.cn/v1/chat/completions"
+    ];
+    let d=null, lastErr=null;
+    for(const url of endpoints){
+      try{
+        const resp=await proxyFetch(url,{"Authorization":"Bearer "+key},kimiBody);
+        if(resp && !resp.error){ d=resp; break; }
+        lastErr=(resp&&resp.error&&(resp.error.message||JSON.stringify(resp.error)))||"Неизвестная ошибка";
+      }catch(e){ lastErr=e.message; }
     }
-    if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
+    if(!d) throw new Error(lastErr||"Kimi: ни один эндпоинт не ответил");
     return (d.choices[0].message.content||"").trim();
   });
 }
@@ -3306,7 +3315,7 @@ async function callAgent(agent, system, history, onChunk){
     case "gemini":     return keys.gemini?callGemini(keys.gemini,effectiveSystem,history):Promise.reject(new Error("Добавь ключ Gemini в ⚙️ Настройки → aistudio.google.com (бесплатно)"));
     case "perplexity": return keys.perplexity?callPerplexity(keys.perplexity,effectiveSystem,history):Promise.reject(new Error("Добавь ключ Perplexity в ⚙️ Настройки → perplexity.ai/settings/api"));
     case "deepseek":   return keys.deepseek?callDeepSeek(keys.deepseek,effectiveSystem,history,onChunk):Promise.reject(new Error("Добавь ключ DeepSeek в ⚙️ Настройки → platform.deepseek.com"));
-    case "kimi":       return keys.kimi?callKimi(keys.kimi,effectiveSystem,history):Promise.reject(new Error("Добавь ключ Kimi в ⚙️ Настройки → platform.moonshot.cn"));
+    case "kimi":       return keys.kimi?callKimi(keys.kimi,effectiveSystem,history):Promise.reject(new Error("Добавь ключ Kimi в ⚙️ Настройки → platform.kimi.ai"));
     case "gpt":        return keys.gpt?callOpenAI(keys.gpt,effectiveSystem,history):Promise.reject(new Error("Добавь ключ GPT-4o в ⚙️ Настройки → platform.openai.com"));
   }
 }
@@ -5101,13 +5110,15 @@ function renderMessages(){
       agents.forEach(a=>{
         const r=results[a.id]||{status:"error",text:"Нет данных"};
         const cid=tid+"_"+a.id;
-        h+=`<div id="${cid}" style="background:#13131a;border:1px solid ${r.status==="ok"?a.color+"55":"#7f1d1d"};border-radius:10px;overflow:hidden">`;
+        h+=`<div id="${cid}" style="background:#ffffff;border:1px solid ${r.status==="ok"?a.color+"55":"#7f1d1d"};border-radius:10px;overflow:hidden">`;
         h+=`<div onclick="toggleAgentCard('${cid}')" style="display:flex;align-items:center;gap:6px;padding:9px 10px;cursor:pointer">`;
         h+=`<span>${a.emoji}</span><span style="font-size:11px;font-weight:700;color:${r.status==="ok"?a.color:"#6b7280"}">${a.name}</span>`;
         h+=`<span style="font-size:9px;background:#f1f5f9;padding:1px 5px;border-radius:3px;color:#64748b">${a.badge}</span>`;
         h+=`<span style="margin-left:auto;font-size:11px;color:${r.status==="ok"?"#4ade80":"#f87171"}">${r.status==="ok"?"✓":"✗"}</span>`;
         h+=`<span id="${cid}_arr" style="font-size:9px;color:#4b5563;margin-left:2px">▼</span></div>`;
-        h+=`<div id="${cid}_body" style="display:none;border-top:1px solid #f1f5f9;padding:10px"><div style="font-size:15px;color:#334155;line-height:1.9">${renderMd(r.text)}</div></div></div>`;
+        h+=`<div id="${cid}_body" style="display:none;border-top:1px solid #f1f5f9;padding:10px">`;
+        h+=`<div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button onclick="openAgentFull('${tid}','${a.id}')" style="padding:3px 9px;background:#f1f5f9;color:#6366f1;border:1px solid #6366f133;border-radius:5px;font-size:11px;cursor:pointer">⛶ На весь экран</button></div>`;
+        h+=`<div id="${cid}_text" style="font-size:15px;color:#334155;line-height:1.9">${renderMd(r.text)}</div></div></div>`;
       });
       h+=`</div>`;
       // Consolidated
@@ -5199,7 +5210,7 @@ async function kimiPresent(turnId){
   const el=document.getElementById(turnId+"_consolidated");
   if(!el) return;
   const keys=getKeys();
-  if(!keys.kimi){alert("Добавь ключ Kimi в ⚙️ Настройки → platform.moonshot.cn");return;}
+  if(!keys.kimi){alert("Добавь ключ Kimi в ⚙️ Настройки → platform.kimi.ai");return;}
   const chat=getChat();
   showToast("🔵 Kimi генерирует слайды...");
   try{
