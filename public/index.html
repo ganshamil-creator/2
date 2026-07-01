@@ -24,6 +24,7 @@
   <script src="vendor/pdf.min.js"></script>
   <script src="vendor/pdf-lib.min.js"></script>
   <script src="vendor/mammoth.browser.min.js"></script>
+  <script src="vendor/jszip.min.js"></script>
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -575,6 +576,7 @@
   </button>
   <button onclick="openMemoryModal()" id="memoryBtn" title="Сквозная память" style="padding:5px 10px;background:#f5f3ff;border:1px solid #c4b5fd;border-radius:6px;color:#7c3aed;font-size:14px;position:relative">🧠<span id="memoryBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:#7c3aed;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;line-height:14px;text-align:center"></span></button>
   <button onclick="toggleHealthMode()" id="healthBtn" title="Health Manager" style="padding:5px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;color:#16a34a;font-size:14px">🫀</button>
+  <button onclick="toggleQuickMode()" id="quickBtn" title="Быстрый режим — один AI без синтеза" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:14px">⚡</button>
   <button onclick="showSettings()" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:18px;line-height:1">⚙️</button>
 </div>
 
@@ -582,12 +584,7 @@
 <!-- QUICK MODE BAR -->
 <div id="quickBar" style="display:none;padding:8px 12px;background:#fefce8;border-top:1px solid #fde047;flex-shrink:0;align-items:center;gap:8px;flex-wrap:wrap">
   <span style="font-size:13px;font-weight:600;color:#92400e">⚡ Быстрый режим:</span>
-  <select id="quickAgent" style="padding:5px 10px;background:#fff;border:1px solid #fde047;border-radius:7px;color:#1e293b;font-size:13px">
-    <option value="claude">🟠 Claude</option>
-    <option value="gemini">🔴 Gemini</option>
-    <option value="perplexity">🟣 Perplexity</option>
-    <option value="deepseek">⚡ DeepSeek</option>
-  </select>
+  <select id="quickAgent" style="padding:5px 10px;background:#fff;border:1px solid #fde047;border-radius:7px;color:#1e293b;font-size:13px"></select>
   <span style="font-size:12px;color:#78350f">Отвечает только 1 AI — быстро и без синтеза</span>
   <button onclick="toggleQuickMode()" style="margin-left:auto;background:none;border:none;color:#92400e;font-size:16px;cursor:pointer">✕</button>
 </div>
@@ -836,19 +833,20 @@ function getToday(){
 // ════════════════════════════════════════════════════════════════
 // AGENTS
 // ════════════════════════════════════════════════════════════════
+const FILE_EXPORT_NOTE = " В приложении есть кнопки экспорта: если оформишь ответ как Markdown-таблицу (| Колонка | ... |), пользователь кнопкой «📊 Excel» получит настоящий файл .xlsx; обычный форматированный текст с заголовками (# ## ###) кнопкой «📝 Word» станет файлом .docx. Поэтому НИКОГДА не пиши, что не можешь создать Excel/Word файл — просто сразу давай готовую таблицу/текст в нужном формате. Экспорта в .pptx пока нет — для презентаций давай текстовое содержание по слайдам, которое пользователь сам вставит в PowerPoint.";
 const ALL_AGENTS = [
   {id:"claude",    name:"Claude",     emoji:"🟠", color:"#d97706", badge:"Sonnet 4.6",
-   system:"Ты Claude от Anthropic. Давай аналитические глубокие ответы. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения. Помни историю разговора. Если в сообщении пользователя есть блок АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ИНТЕРНЕТА — используй их как главный источник фактов, они получены из веб-поиска прямо сейчас."},
+   system:"Ты Claude от Anthropic. Давай аналитические глубокие ответы. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения. Помни историю разговора. Если в сообщении пользователя есть блок АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ИНТЕРНЕТА — используй их как главный источник фактов, они получены из веб-поиска прямо сейчас."+FILE_EXPORT_NOTE},
   {id:"gemini",    name:"Gemini",     emoji:"🔴", color:"#ea4335", badge:"2.5 Flash",
-   system:"Ты Google Gemini. Анализируй глубоко. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём и процитируй его в ответе. Умеешь точно переводить между любыми языками. Используй дату из контекста. Если есть данные поиска — используй их."},
+   system:"Ты Google Gemini. Анализируй глубоко. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём и процитируй его в ответе. Умеешь точно переводить между любыми языками. Используй дату из контекста. Если есть данные поиска — используй их."+FILE_EXPORT_NOTE},
   {id:"perplexity",name:"Perplexity", emoji:"🟣", color:"#8b5cf6", badge:"Sonar Pro",
-   system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."},
+   system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."+FILE_EXPORT_NOTE},
   {id:"deepseek",  name:"DeepSeek",   emoji:"⚡", color:"#06b6d4", badge:"V4",
-   system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста."},
+   system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста."+FILE_EXPORT_NOTE},
   {id:"kimi",      name:"Kimi",       emoji:"🔵", color:"#3b82f6", badge:"K2.7 Code",
-   system:"Ты Kimi от Moonshot AI. Специализируешься на креативных задачах, финансовых расчётах и анализе длинных документов. Давай нестандартные практичные решения. Если есть контекст от предыдущих агентов — используй его и дополни своим уникальным взглядом. Используй дату из контекста."},
+   system:"Ты Kimi от Moonshot AI. Специализируешься на креативных задачах, финансовых расчётах и анализе длинных документов. Давай нестандартные практичные решения. Если есть контекст от предыдущих агентов — используй его и дополни своим уникальным взглядом. Используй дату из контекста."+FILE_EXPORT_NOTE},
   {id:"gpt",       name:"GPT-5.4",     emoji:"🟢", color:"#10a779", badge:"5.4 mini",
-   system:"Ты GPT-5.4 от OpenAI. Давай практичные пошаговые решения и конкретные рекомендации. Специализируешься на прикладных задачах, инструкциях и советах. Если есть контекст от предыдущих агентов — обогати его практическими советами. Используй дату из контекста."},
+   system:"Ты GPT-5.4 от OpenAI. Давай практичные пошаговые решения и конкретные рекомендации. Специализируешься на прикладных задачах, инструкциях и советах. Если есть контекст от предыдущих агентов — обогати его практическими советами. Используй дату из контекста."+FILE_EXPORT_NOTE},
 ];
 
 // ════════════════════════════════════════════════════════════════
@@ -3570,6 +3568,45 @@ function handleFiles(input){
         }catch(docxErr){ showToast("⚠️ Ошибка чтения DOCX: "+docxErr.message); }
       } else if(f.name.endsWith(".doc")||f.type==="application/msword"){
         showToast("⚠️ Формат .doc не поддерживается. Сохрани как .docx");
+      } else if(f.name.endsWith(".pptx")||f.type==="application/vnd.openxmlformats-officedocument.presentationml.presentation"){
+        // Читаем PPTX как ZIP-архив через JSZip, вытаскиваем текст из XML каждого слайда
+        showToast("📽️ Читаю PPTX: "+f.name);
+        try{
+          if(window.JSZip){
+            const arrBuf=await f.arrayBuffer();
+            const zip=await JSZip.loadAsync(arrBuf);
+            const slideFiles=Object.keys(zip.files)
+              .filter(n=>/^ppt\/slides\/slide\d+\.xml$/.test(n))
+              .sort((a,b)=>{
+                const na=parseInt(a.match(/(\d+)/)[1],10), nb=parseInt(b.match(/(\d+)/)[1],10);
+                return na-nb;
+              });
+            let text="";
+            for(let i=0;i<slideFiles.length;i++){
+              const xml=await zip.files[slideFiles[i]].async("text");
+              // Текстовые куски лежат в тегах <a:t>...</a:t>
+              const matches=[...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m=>m[1]);
+              const slideText=matches.join(" ").replace(/\s+/g," ").trim();
+              if(slideText) text+="[Слайд "+(i+1)+"]\n"+slideText+"\n\n";
+            }
+            // Заметки к слайдам (speaker notes) — тоже полезны для контекста
+            const notesFiles=Object.keys(zip.files).filter(n=>/^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(n));
+            for(const nf of notesFiles){
+              const xml=await zip.files[nf].async("text");
+              const matches=[...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m=>m[1]);
+              const noteText=matches.join(" ").replace(/\s+/g," ").trim();
+              if(noteText) text+="[Заметки к слайду]\n"+noteText+"\n\n";
+            }
+            if(text.trim().length>5){
+              obj.text=text.slice(0,20000);
+              showToast("✅ PPTX прочитан: "+slideFiles.length+" слайдов");
+            } else {
+              showToast("⚠️ PPTX: текст не найден (возможно, только изображения/графика)");
+            }
+          } else {
+            showToast("⚠️ JSZip не загружен — PPTX не прочитан");
+          }
+        }catch(pptxErr){ showToast("⚠️ Ошибка чтения PPTX: "+pptxErr.message); }
       } else if(f.name.endsWith(".xlsx")||f.name.endsWith(".xls")||
                 f.type==="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"||
                 f.type==="application/vnd.ms-excel"){
@@ -4116,10 +4153,25 @@ function toggleQuickMode(){
   const bar = document.getElementById("quickBar");
   const btn = document.getElementById("quickBtn");
   bar.style.display = quickMode ? "flex" : "none";
-  btn.style.background = quickMode ? "#fef08a" : "#f1f5f9";
-  btn.style.color = quickMode ? "#92400e" : "#475569";
-  btn.style.borderColor = quickMode ? "#fde047" : "#e2e8f0";
-  if(quickMode) showToast("⚡ Быстрый режим — выбери AI и задай вопрос");
+  if(btn){
+    btn.style.background = quickMode ? "#fef08a" : "#f1f5f9";
+    btn.style.color = quickMode ? "#92400e" : "#475569";
+    btn.style.borderColor = quickMode ? "#fde047" : "#e2e8f0";
+  }
+  if(quickMode){
+    populateQuickAgentSelect();
+    if(chainMode) toggleChainMode();
+    showToast("⚡ Быстрый режим — выбери AI и задай вопрос");
+  }
+}
+
+function populateQuickAgentSelect(){
+  const sel = document.getElementById("quickAgent");
+  if(!sel) return;
+  const prev = sel.value;
+  const agents = getAgents().length ? getAgents() : ALL_AGENTS;
+  sel.innerHTML = agents.map(a=>`<option value="${a.id}">${a.emoji} ${a.name}</option>`).join("");
+  if(prev && agents.some(a=>a.id===prev)) sel.value = prev;
 }
 
 function toggleChainMode(){
