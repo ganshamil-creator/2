@@ -5404,16 +5404,72 @@ function buildRevealPresentation(data){
   const accents=["#6366f1","#02C39A","#f59e0b","#38bdf8"];
   const accent=accents[Math.floor(Math.random()*accents.length)];
   let slidesHtml="";
-  (data.slides||[]).forEach(sl=>{
+  const slides=data.slides||[];
+  slides.forEach(sl=>{
     let c="";
-    if(sl.type==="title") c=`<h1 style="font-size:2em;font-weight:800;margin-bottom:.4em;line-height:1.1">${escHtml(sl.heading||"")}</h1><p style="font-size:1em;opacity:.75">${escHtml(sl.body||"")}</p>`;
-    else if(sl.type==="points") c=`<h2 style="font-size:1.4em;font-weight:700;color:${accent};margin-bottom:.6em">${escHtml(sl.heading||"")}</h2><ul style="list-style:none;padding:0;text-align:left;display:inline-block;max-width:800px">${(sl.points||[]).map((p,i)=>`<li style="display:flex;align-items:flex-start;gap:10px;margin-bottom:.5em"><span style="background:${accent};color:#fff;border-radius:50%;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-size:.75em;font-weight:700;flex-shrink:0;margin-top:2px">${i+1}</span><span>${escHtml(p)}</span></li>`).join("")}</ul>`;
-    else if(sl.type==="quote") c=`<div style="font-size:4em;opacity:.15;color:${accent}">"</div><blockquote style="font-size:1.3em;font-style:italic;line-height:1.6;margin:-.3em 0 .6em;max-width:800px">${escHtml(sl.quote||"")}</blockquote><div style="font-size:.8em;opacity:.5">— ${escHtml(sl.author||"")}</div>`;
-    else if(sl.type==="conclusion") c=`<div style="font-size:.65em;text-transform:uppercase;letter-spacing:4px;color:${accent};margin-bottom:.6em">Заключение</div><h2 style="font-size:1.8em;font-weight:700;margin-bottom:.5em">${escHtml(sl.heading||"")}</h2><p style="font-size:1em;opacity:.8;line-height:1.7;max-width:700px">${escHtml(sl.body||"")}</p>`;
-    slidesHtml+=`<section style="text-align:center;padding:40px">${c}</section>`;
+    if(sl.type==="title") c=`<h1 style="font-size:2.4em;font-weight:800;margin-bottom:.4em;line-height:1.1">${escHtml(sl.heading||"")}</h1><p style="font-size:1.1em;opacity:.75">${escHtml(sl.body||"")}</p>`;
+    else if(sl.type==="points") c=`<h2 style="font-size:1.6em;font-weight:700;color:${accent};margin-bottom:.6em">${escHtml(sl.heading||"")}</h2><ul style="list-style:none;padding:0;text-align:left;display:inline-block;max-width:800px">${(sl.points||[]).map((p,i)=>`<li style="display:flex;align-items:flex-start;gap:10px;margin-bottom:.6em"><span style="background:${accent};color:#fff;border-radius:50%;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;font-size:.75em;font-weight:700;flex-shrink:0;margin-top:2px">${i+1}</span><span style="font-size:1.1em">${escHtml(p)}</span></li>`).join("")}</ul>`;
+    else if(sl.type==="quote") c=`<div style="font-size:4em;opacity:.15;color:${accent};line-height:.5">"</div><blockquote style="font-size:1.5em;font-style:italic;line-height:1.6;margin:-.3em 0 .6em;max-width:800px">${escHtml(sl.quote||"")}</blockquote><div style="font-size:.9em;opacity:.5">— ${escHtml(sl.author||"")}</div>`;
+    else if(sl.type==="conclusion") c=`<div style="font-size:.7em;text-transform:uppercase;letter-spacing:4px;color:${accent};margin-bottom:.6em">Заключение</div><h2 style="font-size:2em;font-weight:700;margin-bottom:.5em">${escHtml(sl.heading||"")}</h2><p style="font-size:1.1em;opacity:.8;line-height:1.7;max-width:700px">${escHtml(sl.body||"")}</p>`;
+    else c=`<p style="font-size:1.1em">${escHtml(sl.body||sl.heading||"")}</p>`;
+    slidesHtml+=`<section class="slide">${c}</section>`;
   });
-  const cdn="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.6.1";
-  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escHtml(data.title||"Презентация")}</title><link rel="stylesheet" href="${cdn}/reveal.min.css"><link rel="stylesheet" href="${cdn}/theme/black.min.css"><style>body{margin:0}.reveal{font-family:Segoe UI,system-ui,sans-serif}.reveal .progress{color:${accent}}.reveal .controls{color:${accent}}</style></head><body><div class="reveal"><div class="slides">${slidesHtml}</div></div><script src="${cdn}/reveal.min.js"><\/script><script>Reveal.initialize({hash:false,controls:true,progress:true,center:true,transition:"slide",embedded:true});<\/script>
+  const dots=slides.map((_,i)=>`<span class="dot" data-i="${i}"></span>`).join("");
+  // Полностью самодостаточный HTML — ни одного внешнего запроса (шрифты/скрипты/CSS),
+  // чтобы презентация открывалась даже если внешние CDN (cdnjs и т.п.) заблокированы у
+  // пользователя — раньше слайды тянули reveal.js с cdnjs.cloudflare.com и падали в черный
+  // экран в РФ, где этот домен часто недоступен без VPN.
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escHtml(data.title||"Презентация")}</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#0f172a;font-family:-apple-system,Segoe UI,Roboto,system-ui,sans-serif;color:#f8fafc;overflow:hidden}
+  .deck{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center}
+  .slide{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:8vh 8vw;opacity:0;transition:opacity .35s ease}
+  .slide.active{display:flex;opacity:1}
+  .bar{position:absolute;top:0;left:0;height:4px;background:${accent};transition:width .3s ease;z-index:5}
+  .nav{position:absolute;bottom:18px;left:0;right:0;display:flex;align-items:center;justify-content:center;gap:14px;z-index:5}
+  .nav button{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#f8fafc;width:40px;height:40px;border-radius:50%;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .nav button:hover{background:rgba(255,255,255,.18)}
+  .dots{display:flex;gap:6px}
+  .dot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.25);cursor:pointer}
+  .dot.active{background:${accent};transform:scale(1.3)}
+  .counter{position:absolute;top:14px;right:18px;font-size:12px;opacity:.5;z-index:5}
+  blockquote{margin:0}
+</style></head>
+<body>
+  <div class="bar" id="bar" style="width:${slides.length?100/slides.length:100}%"></div>
+  <div class="counter" id="counter">1 / ${slides.length||1}</div>
+  <div class="deck">${slidesHtml}</div>
+  <div class="nav">
+    <button id="prevBtn" aria-label="Назад">‹</button>
+    <div class="dots" id="dots">${dots}</div>
+    <button id="nextBtn" aria-label="Вперёд">›</button>
+  </div>
+<script>
+(function(){
+  var slides=document.querySelectorAll('.slide');
+  var dotEls=document.querySelectorAll('.dot');
+  var bar=document.getElementById('bar');
+  var counter=document.getElementById('counter');
+  var i=0;
+  function show(n){
+    if(!slides.length) return;
+    i=(n+slides.length)%slides.length;
+    slides.forEach(function(s,idx){ s.classList.toggle('active', idx===i); });
+    dotEls.forEach(function(d,idx){ d.classList.toggle('active', idx===i); });
+    bar.style.width=((i+1)/slides.length*100)+'%';
+    counter.textContent=(i+1)+' / '+slides.length;
+  }
+  document.getElementById('prevBtn').onclick=function(){show(i-1);};
+  document.getElementById('nextBtn').onclick=function(){show(i+1);};
+  dotEls.forEach(function(d){ d.onclick=function(){show(parseInt(d.dataset.i,10));}; });
+  document.addEventListener('keydown',function(e){
+    if(e.key==='ArrowRight'||e.key===' ') show(i+1);
+    else if(e.key==='ArrowLeft') show(i-1);
+  });
+  show(0);
+})();
+<\/script>
 </body></html>`;
   showRevealModal(html, data.title||"Презентация");
 }
