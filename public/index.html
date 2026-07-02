@@ -3112,10 +3112,32 @@ async function callClaude(key, system, history, onChunk, forceModel){
       // (при code execution ответ содержит несколько типов блоков — их проще разобрать целиком,
       // чем на лету парсить из SSE-потока)
       const proxyHeaders={"x-api-key":key,"anthropic-version":"2023-06-01"};
-      if(useCodeExec) proxyHeaders["anthropic-beta"]="code-execution-2025-08-25";
-      const d=await proxyFetch("https://api.anthropic.com/v1/messages",proxyHeaders,{...bodyObj,stream:false});
-      if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
-      return useCodeExec ? formatClaudeContentBlocks(d.content) : d.content.map(b=>b.text||"").join("").trim();
+      if(!useCodeExec){
+        const d=await proxyFetch("https://api.anthropic.com/v1/messages",proxyHeaders,{...bodyObj,stream:false});
+        if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
+        return d.content.map(b=>b.text||"").join("").trim();
+      }
+      proxyHeaders["anthropic-beta"]="code-execution-2025-08-25";
+      // Задачи с несколькими шагами кода (написать → запустить → проанализировать вывод,
+      // особенно с несколькими тест-кейсами) Anthropic иногда прерывает с stop_reason:"pause_turn" —
+      // это означает "продолжи, отправив мой же ответ обратно", а не финальный ответ. Раньше хаб
+      // брал только первый кусок как есть — если пауза случалась ДО того как модель написала
+      // текстовое резюме, видимый ответ получался пустым. Теперь дозапрашиваем, пока не дойдём
+      // до настоящего конца хода (максимум 6 шагов, чтобы не уйти в бесконечный цикл).
+      let allBlocks=[], runMessages=history, containerId=null, d=null;
+      for(let step=0; step<6; step++){
+        const stepBody={...bodyObj, messages:runMessages, stream:false};
+        if(containerId) stepBody.container=containerId;
+        d=await proxyFetch("https://api.anthropic.com/v1/messages",proxyHeaders,stepBody);
+        if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
+        allBlocks=allBlocks.concat(d.content||[]);
+        if(typeof d.container==="string") containerId=d.container;
+        else if(d.container&&d.container.id) containerId=d.container.id;
+        if(d.stop_reason!=="pause_turn") break;
+        runMessages=[...runMessages, {role:"assistant", content:d.content}];
+      }
+      const formatted = formatClaudeContentBlocks(allBlocks);
+      return formatted || "⚠️ Claude выполнил код, но не оставил текстового ответа (или задача не уложилась в лимит шагов). Попробуй разбить вопрос на более простые части.";
     }
     const bodySize=body.length;
     const claudeTimeout=bodySize>100000?180000:bodySize>30000?120000:60000;
