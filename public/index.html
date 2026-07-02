@@ -577,6 +577,8 @@
   <button onclick="openMemoryModal()" id="memoryBtn" title="Сквозная память" style="padding:5px 10px;background:#f5f3ff;border:1px solid #c4b5fd;border-radius:6px;color:#7c3aed;font-size:14px;position:relative">🧠<span id="memoryBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:#7c3aed;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;line-height:14px;text-align:center"></span></button>
   <button onclick="toggleHealthMode()" id="healthBtn" title="Health Manager" style="padding:5px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;color:#16a34a;font-size:14px">🫀</button>
   <button onclick="toggleQuickMode()" id="quickBtn" title="Быстрый режим — один AI без синтеза" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:14px">⚡</button>
+  <button onclick="toggleCodeExec()" id="codeExecBtn" title="Выполнение кода — Claude сможет реально запускать код и показывать результат" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:14px">🖥️</button>
+  <button onclick="toggleSearch()" id="searchBtn" title="Веб-поиск (Tavily)" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:14px">🌐</button>
   <button onclick="showSettings()" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:18px;line-height:1">⚙️</button>
 </div>
 
@@ -795,6 +797,7 @@ let activeChatId = chats[0].id;
 let thinking = false;
 let currentFiles = [];
 let searchEnabled = false;
+let codeExecEnabled = false;
 let activeAgentIds = JSON.parse(localStorage.getItem("active_agents")||"null") || ["claude","gemini","perplexity","deepseek"];
 
 function getChat(){ return chats.find(c=>c.id===activeChatId); }
@@ -835,7 +838,7 @@ function getToday(){
 // ════════════════════════════════════════════════════════════════
 const FILE_EXPORT_NOTE = " В приложении есть кнопки экспорта: если оформишь ответ как Markdown-таблицу (| Колонка | ... |), пользователь кнопкой «📊 Excel» получит настоящий файл .xlsx; обычный форматированный текст с заголовками (# ## ###) кнопкой «📝 Word» станет файлом .docx. Поэтому НИКОГДА не пиши, что не можешь создать Excel/Word файл — просто сразу давай готовую таблицу/текст в нужном формате. Экспорта в .pptx пока нет — для презентаций давай текстовое содержание по слайдам, которое пользователь сам вставит в PowerPoint.";
 const ALL_AGENTS = [
-  {id:"claude",    name:"Claude",     emoji:"🟠", color:"#d97706", badge:"Sonnet 4.6",
+  {id:"claude",    name:"Claude",     emoji:"🟠", color:"#d97706", badge:"Sonnet 5",
    system:"Ты Claude от Anthropic. Давай аналитические глубокие ответы. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения. Помни историю разговора. Если в сообщении пользователя есть блок АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ИНТЕРНЕТА — используй их как главный источник фактов, они получены из веб-поиска прямо сейчас."+FILE_EXPORT_NOTE},
   {id:"gemini",    name:"Gemini",     emoji:"🔴", color:"#ea4335", badge:"2.5 Flash",
    system:"Ты Google Gemini. Анализируй глубоко. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём и процитируй его в ответе. Умеешь точно переводить между любыми языками. Используй дату из контекста. Если есть данные поиска — используй их."+FILE_EXPORT_NOTE},
@@ -848,6 +851,13 @@ const ALL_AGENTS = [
   {id:"gpt",       name:"GPT-5.4",     emoji:"🟢", color:"#10a779", badge:"5.4 mini",
    system:"Ты GPT-5.4 от OpenAI. Давай практичные пошаговые решения и конкретные рекомендации. Специализируешься на прикладных задачах, инструкциях и советах. Если есть контекст от предыдущих агентов — обогати его практическими советами. Используй дату из контекста."+FILE_EXPORT_NOTE},
 ];
+
+// Claude Fable 5 — премиальная Mythos-модель. НЕ входит в ALL_AGENTS (чтобы не участвовать
+// в параллельном/цепочном режимах по умолчанию — дорого), доступна только через Quick Mode.
+const FABLE_AGENT = {
+  id:"fable", name:"Claude Fable 5", emoji:"✨", color:"#7c3aed", badge:"Fable 5 · тяжёлый",
+  system:"Ты Claude Fable 5 от Anthropic — топовая модель уровня Mythos для долгих, сложных и многошаговых задач: глубокий анализ, код, стратегия, объёмные документы. Давай максимально тщательные, выверенные ответы, разворачивай рассуждение настолько, насколько того требует сложность задачи. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения."+FILE_EXPORT_NOTE
+};
 
 // ════════════════════════════════════════════════════════════════
 // API CALLERS
@@ -3018,20 +3028,57 @@ function pickClaudeModel(history){
   const text=(Array.isArray(last?.content)?last.content.find(c=>c.type==="text")?.text||"":last?.content||"").toLowerCase();
   const heavy=["слайд","presentation","презентац","подробно","детально","анализ","стратег","бизнес план","эссе","реферат","диплом","промпт","перевед","translate","summarize","сравни","сравнение"];
   const hasFile=history.some(m=>Array.isArray(m.content)&&m.content.some(c=>c.type==="image"||c.type==="document"));
-  if(hasFile||heavy.some(k=>text.includes(k))||text.length>400) return "claude-sonnet-4-6";
+  if(hasFile||heavy.some(k=>text.includes(k))||text.length>400) return "claude-sonnet-5";
   return "claude-haiku-4-5"; // Haiku — для простых быстрых запросов, Sonnet — для сложных/файлов
 }
 
-async function callClaude(key, system, history, onChunk){
+// Разбирает content-блоки ответа Claude при включённом code_execution tool:
+// текст + запущенный код + вывод (stdout/stderr) собираются в единый читаемый markdown-текст.
+function formatClaudeContentBlocks(content){
+  if(!Array.isArray(content)) return "";
+  let out="";
+  for(const b of content){
+    try{
+      if(b.type==="text"){
+        out+=(b.text||"");
+      } else if(typeof b.type==="string" && b.type.includes("tool_use") && b.name==="code_execution"){
+        const cmd=(b.input&&(b.input.command||b.input.code))||JSON.stringify(b.input||{});
+        out+="\n\n```\n"+cmd+"\n```\n";
+      } else if(typeof b.type==="string" && b.type.includes("tool_result")){
+        const c=b.content;
+        let txt="";
+        if(typeof c==="string") txt=c;
+        else if(Array.isArray(c)){
+          txt=c.map(x=>x.text||x.stdout||x.stderr||"").filter(Boolean).join("\n");
+        } else if(c&&typeof c==="object"){
+          if(c.stdout) txt+=c.stdout;
+          if(c.stderr) txt+=(txt?"\n":"")+"[stderr] "+c.stderr;
+          if(!txt&&c.error_code) txt="[ошибка выполнения кода: "+c.error_code+"]";
+          if(!txt) txt=JSON.stringify(c).slice(0,2000);
+        }
+        if(txt) out+="\n```\n"+txt.trim()+"\n```\n";
+      }
+    }catch(_){}
+  }
+  return out.trim();
+}
+
+async function callClaude(key, system, history, onChunk, forceModel){
   return callWithRetry(async()=>{
-    const model=pickClaudeModel(history);
-    const bodyObj={model,max_tokens:calcTokens(history),system,messages:history,stream:!isMobile};
+    const model=forceModel||pickClaudeModel(history);
+    const useCodeExec = typeof codeExecEnabled!=="undefined" && codeExecEnabled;
+    const bodyObj={model,max_tokens:calcTokens(history),system,messages:history,stream:!isMobile&&!useCodeExec};
+    if(useCodeExec) bodyObj.tools=[{type:"code_execution_20250825",name:"code_execution"}];
     const body=JSON.stringify(bodyObj);
-    if(isMobile){
-      // Мобильный — без стриминга через прокси
-      const d=await proxyFetch("https://api.anthropic.com/v1/messages",{"x-api-key":key,"anthropic-version":"2023-06-01"},{...bodyObj,stream:false});
+    if(isMobile||useCodeExec){
+      // Мобильный ИЛИ включено выполнение кода — без стриминга через прокси
+      // (при code execution ответ содержит несколько типов блоков — их проще разобрать целиком,
+      // чем на лету парсить из SSE-потока)
+      const proxyHeaders={"x-api-key":key,"anthropic-version":"2023-06-01"};
+      if(useCodeExec) proxyHeaders["anthropic-beta"]="code-execution-2025-08-25";
+      const d=await proxyFetch("https://api.anthropic.com/v1/messages",proxyHeaders,{...bodyObj,stream:false});
       if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
-      return d.content.map(b=>b.text||"").join("").trim();
+      return useCodeExec ? formatClaudeContentBlocks(d.content) : d.content.map(b=>b.text||"").join("").trim();
     }
     const bodySize=body.length;
     const claudeTimeout=bodySize>100000?180000:bodySize>30000?120000:60000;
@@ -3355,6 +3402,7 @@ async function callAgent(agent, system, history, onChunk){
   if(memCtx) effectiveSystem = memCtx + "\n\n" + effectiveSystem;
   switch(agent.id){
     case "claude":     return keys.claude?callClaude(keys.claude,effectiveSystem,history,onChunk):Promise.reject(new Error("Добавь ключ Claude в ⚙️ Настройки → console.anthropic.com"));
+    case "fable":      return keys.claude?callClaude(keys.claude,effectiveSystem,history,onChunk,"claude-fable-5"):Promise.reject(new Error("Добавь ключ Claude в ⚙️ Настройки → console.anthropic.com"));
     case "gemini":     return keys.gemini?callGemini(keys.gemini,effectiveSystem,history):Promise.reject(new Error("Добавь ключ Gemini в ⚙️ Настройки → aistudio.google.com (бесплатно)"));
     case "perplexity": return keys.perplexity?callPerplexity(keys.perplexity,effectiveSystem,history):Promise.reject(new Error("Добавь ключ Perplexity в ⚙️ Настройки → perplexity.ai/settings/api"));
     case "deepseek":   return keys.deepseek?callDeepSeek(keys.deepseek,effectiveSystem,history,onChunk):Promise.reject(new Error("Добавь ключ DeepSeek в ⚙️ Настройки → platform.deepseek.com"));
@@ -4170,8 +4218,10 @@ function populateQuickAgentSelect(){
   if(!sel) return;
   const prev = sel.value;
   const agents = getAgents().length ? getAgents() : ALL_AGENTS;
-  sel.innerHTML = agents.map(a=>`<option value="${a.id}">${a.emoji} ${a.name}</option>`).join("");
-  if(prev && agents.some(a=>a.id===prev)) sel.value = prev;
+  let html = agents.map(a=>`<option value="${a.id}">${a.emoji} ${a.name}</option>`).join("");
+  if(getKeys().claude) html += `<option value="fable">${FABLE_AGENT.emoji} ${FABLE_AGENT.name} (дороже, для сложных задач)</option>`;
+  sel.innerHTML = html;
+  if(prev && [...sel.options].some(o=>o.value===prev)) sel.value = prev;
 }
 
 function toggleChainMode(){
@@ -4190,6 +4240,18 @@ function toggleChainMode(){
 }
 
 
+function toggleCodeExec(){
+  codeExecEnabled = !codeExecEnabled;
+  const btn = document.getElementById("codeExecBtn");
+  if(btn){
+    btn.style.background = codeExecEnabled ? "#0f172a" : "#f1f5f9";
+    btn.style.color = codeExecEnabled ? "#60a5fa" : "#475569";
+    btn.style.borderColor = codeExecEnabled ? "#1e3a5f" : "#e2e8f0";
+  }
+  showToast(codeExecEnabled ? "🖥️ Выполнение кода включено — работает только с Claude/Fable 5" : "🖥️ Выполнение кода выключено");
+}
+
+
 function toggleSearch(){
   searchEnabled=!searchEnabled;
   document.getElementById("searchBadge").style.display=searchEnabled?"flex":"none";
@@ -4200,7 +4262,7 @@ function toggleSearch(){
 // ── Quick Send (один агент) ────────────────────────────────────
 async function sendQuick(text, inp){
   const agentId = document.getElementById("quickAgent")?.value || "claude";
-  const agent = ALL_AGENTS.find(a=>a.id===agentId);
+  const agent = agentId==="fable" ? FABLE_AGENT : ALL_AGENTS.find(a=>a.id===agentId);
   if(!agent){ showToast("❌ Агент не найден"); return; }
 
   const filesToSend=[...currentFiles];
@@ -4240,7 +4302,7 @@ async function sendQuick(text, inp){
   // Vision history
   let agentHistory=history;
   if(imageFiles.length>0){
-    if(agentId==="claude"){
+    if(agentId==="claude"||agentId==="fable"){
       const content=[];
       imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
       content.push({type:"text",text:enrichedMsg});
