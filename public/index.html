@@ -3828,11 +3828,34 @@ async function extractPdfTextFromDataUrl(dataUrl){
   }catch(e){ return ""; }
 }
 
+// Если ответ Vision AI оборвался на середине JSON (не хватило max_tokens), пытаемся вытащить
+// все ПОЛНОСТЬЮ закрытые объекты внутри "markers": [...] и собрать из них валидный JSON,
+// вместо того чтобы терять вообще все распознанные показатели из-за одной незакрытой скобки.
+function repairTruncatedMarkersJSON(txt){
+  var mIdx = txt.indexOf('"markers"');
+  if(mIdx === -1) return null;
+  var arrStart = txt.indexOf('[', mIdx);
+  if(arrStart === -1) return null;
+  var lastGood = -1, depth = 0, inStr = false, esc = false;
+  for(var i=arrStart+1;i<txt.length;i++){
+    var c = txt[i];
+    if(esc){ esc=false; continue; }
+    if(c==='\\'){ esc=true; continue; }
+    if(c==='"'){ inStr=!inStr; continue; }
+    if(inStr) continue;
+    if(c==='{') depth++;
+    else if(c==='}'){ depth--; if(depth===0) lastGood=i; }
+  }
+  if(lastGood === -1) return null;
+  var repaired = txt.slice(0, lastGood+1) + "]}";
+  try{ return JSON.parse(repaired); }catch(e){ return null; }
+}
+
 async function extractFromImageWithVision(apiKey, filename, b64, mimeType, docType, cardId){
   var statusEl = document.getElementById(cardId+"_status");
   try{
     var visionBody = JSON.stringify({
-      model:"claude-sonnet-5", max_tokens:2000,
+      model:"claude-sonnet-5", max_tokens:4096,
       messages:[{role:"user",content:[
         {type:"image",source:{type:"base64",media_type:mimeType,data:b64}},
         {type:"text",text:"Посмотри на изображение медицинского документа и извлеки данные.\n\n"
@@ -3879,7 +3902,18 @@ async function extractFromImageWithVision(apiKey, filename, b64, mimeType, docTy
     var txt = (data.content||[]).map(function(b){return b.text||"";}).join("").trim().replace(/```json|```/g,"").trim();
     var s2=txt.indexOf("{"),e2=txt.lastIndexOf("}");
     if(s2>-1&&e2>s2) txt=txt.slice(s2,e2+1);
-    var result = JSON.parse(txt);
+    var result;
+    try{
+      result = JSON.parse(txt);
+    }catch(parseErr){
+      // Ответ мог оборваться на середине (не хватило max_tokens на длинный список показателей
+      // с нормами) — вместо полного провала пытаемся спасти все ПОЛНОСТЬЮ закрытые объекты
+      // markers, что были до обрыва, а не терять всё распознавание целиком.
+      var repaired = repairTruncatedMarkersJSON(txt);
+      if(!repaired) throw parseErr;
+      result = repaired;
+      showToast("⚠️ Ответ AI был обрезан — сохранены не все показатели, попробуй загрузить фото ещё раз");
+    }
     var markers = Array.isArray(result.markers) ? result.markers : [];
     saveParsedBiomarkers(markers, cardId, result.date);
     // Если AI вернул текстовое заключение (МРТ/УЗИ/КТ и т.п.) — дополняем запись в Vault полным текстом,
