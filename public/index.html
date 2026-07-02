@@ -4350,7 +4350,7 @@ async function sendQuick(text, inp){
       <button onclick="copyText('${turnId}_text')" style="padding:4px 10px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;cursor:pointer">📋 Копировать</button>
       <button class="export-tool" onclick="exportWord('${turnId}')" style="padding:4px 10px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📝 Word</button>
       <button onclick="exportExcel('${turnId}')" style="padding:4px 10px;background:#1a4731;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📊 Excel</button>
-      <button onclick="makeReveal('${turnId}')" style="padding:4px 10px;background:#4c1d95;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">🎭 Слайды</button>
+      <button onclick="makeReveal('${turnId}','${agent.id}')" style="padding:4px 10px;background:#4c1d95;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">🎭 Слайды</button>
       <button onclick="exportTxt('${turnId}')" style="padding:4px 10px;background:#374151;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📄 TXT</button>
     </div>
   </div>`;
@@ -5269,6 +5269,7 @@ function renderMessages(){
     const user=userMsgs[i], assistant=assistantMsgs[i];
     if(user) appendUserBubble(user.content||"", user.files||[]);
     if(assistant){
+     try{
       const tid="hist_"+i;
       const agents=getAgents();
       const results=assistant.agentResults||{};
@@ -5319,12 +5320,16 @@ function renderMessages(){
   h+=`<button onclick="exportTxt('${tid}')" style="padding:4px 10px;background:#374151;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📄 TXT</button>`;
 
   h+=`</div>`;
-      h+=`<div id="${tid}_consolidated" style="font-size:16px;line-height:2.0;color:#1e293b" data-raw="${escHtml(assistant.content)}">${renderMd(assistant.content)}</div>`;
+      const contentStr = typeof assistant.content==="string" ? assistant.content : (assistant.content==null ? "" : JSON.stringify(assistant.content));
+      h+=`<div id="${tid}_consolidated" style="font-size:16px;line-height:2.0;color:#1e293b" data-raw="${escHtml(contentStr)}">${renderMd(contentStr)}</div>`;
       h+=`<div id="${tid}_consolidated_short" style="display:none;font-size:16px;line-height:2.0;color:#1e293b"></div>`;
       if(assistant.analysis) h+=`<div id="${tid}_analysis">${assistant.analysis}</div>`;
       h+=`</div>`;
       ad.innerHTML=h;
       el.appendChild(ad);
+     }catch(renderErr){
+      console.error("renderMessages: не удалось отрисовать сообщение #"+i+" (кнопки экспорта могли пропасть именно из-за этого):", renderErr);
+     }
     }
   }
   scrollToBottom();
@@ -5360,17 +5365,38 @@ function openSlideMaker(turnId){
   });
 }
 
-async function makeReveal(turnId){
+// Вызывает конкретного агента по id напрямую (без каскада synthesize), если для него есть ключ.
+// Возвращает null, если ключа нет — вызывающий код тогда падает на synthesize() как раньше.
+async function callByAgentId(agentId, system, history){
+  const keys=getKeys();
+  try{
+    switch(agentId){
+      case "claude":     return keys.claude?await callClaude(keys.claude,system,history):null;
+      case "fable":      return keys.claude?await callClaude(keys.claude,system,history,null,"claude-fable-5"):null;
+      case "gemini":     return keys.gemini?await callGemini(keys.gemini,system,history):null;
+      case "perplexity": return keys.perplexity?await callPerplexity(keys.perplexity,system,history):null;
+      case "deepseek":   return keys.deepseek?await callDeepSeek(keys.deepseek,system,history):null;
+      case "kimi":       return keys.kimi?await callKimi(keys.kimi,system,history):null;
+      case "gpt":        return keys.gpt?await callOpenAI(keys.gpt,system,history):null;
+      default: return null;
+    }
+  }catch(e){ return null; } // не смогли конкретным агентом — пусть решает synthesize()
+}
+
+async function makeReveal(turnId, preferredAgentId){
   const el=document.getElementById(turnId+"_consolidated")||document.getElementById(turnId+"_text");
   if(!el) return;
   const text=el.dataset.raw||el.textContent;
   const chat=getChat();
-  showToast("🎭 Генерирую Reveal слайды...");
+  showToast(preferredAgentId?"🎭 "+(ALL_AGENTS.find(a=>a.id===preferredAgentId)||FABLE_AGENT).name+" генерирует слайды...":"🎭 Генерирую слайды...");
+  const system="Ты генератор презентаций. Возвращай ТОЛЬКО валидный JSON без markdown.";
+  const prompt=`Создай презентацию. Тема: ${chat?chat.title:"Презентация"}. Текст: ${text.slice(0,3000)}\n\nВерни ТОЛЬКО JSON:\n{"title":"Название","slides":[{"type":"title","heading":"Заголовок","body":"Подзаголовок"},{"type":"points","heading":"Раздел","points":["Тезис 1","Тезис 2","Тезис 3"]},{"type":"quote","quote":"Вывод","author":"AI Hub"},{"type":"conclusion","heading":"Итоги","body":"Финальный вывод"}]}\nСоздай 6-8 слайдов. Чередуй типы.`;
   try{
-    const raw=await synthesize(
-      "Ты генератор презентаций. Возвращай ТОЛЬКО валидный JSON без markdown.",
-      [{role:"user",content:`Создай презентацию. Тема: ${chat?chat.title:"Презентация"}. Текст: ${text.slice(0,3000)}\n\nВерни ТОЛЬКО JSON:\n{"title":"Название","slides":[{"type":"title","heading":"Заголовок","body":"Подзаголовок"},{"type":"points","heading":"Раздел","points":["Тезис 1","Тезис 2","Тезис 3"]},{"type":"quote","quote":"Вывод","author":"AI Hub"},{"type":"conclusion","heading":"Итоги","body":"Финальный вывод"}]}\nСоздай 6-8 слайдов. Чередуй типы.`}]
-    );
+    // Если известен агент, ответом которого мы делимся (например Kimi из Quick Mode) — просим
+    // слайды именно у него, а не у того, кого выберет synthesize() (раньше это ВСЕГДА был
+    // DeepSeek первым в очереди — отсюда и ощущение "слайды слишком простые").
+    let raw = preferredAgentId ? await callByAgentId(preferredAgentId, system, [{role:"user",content:prompt}]) : null;
+    if(!raw) raw = await synthesize(system, [{role:"user",content:prompt}]);
     const cleaned=raw.replace(/```json\s*/gi,"").replace(/```\s*/gi,"").trim();
     const match=cleaned.match(/\{[\s\S]*\}/);
     const data=JSON.parse(match?match[0]:cleaned);
