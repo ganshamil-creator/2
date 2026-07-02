@@ -3865,19 +3865,30 @@ function repairTruncatedMarkersJSON(txt){
   }
   if(lastGood === -1) return null;
   var repaired = txt.slice(0, lastGood+1) + "]}";
-  try{ return JSON.parse(repaired); }catch(e){ return null; }
+  var result;
+  try{ result = JSON.parse(repaired); }catch(e){ return null; }
+  // narrative/date идут в JSON ДО markers (см. промпт) — если они успели полностью
+  // сгенерироваться до обрыва по лимиту токенов, они целиком лежат в куске текста ДО
+  // начала массива markers, и их можно вытащить регуляркой даже когда сам markers обрезан.
+  var head = txt.slice(0, mIdx);
+  var narrMatch = head.match(/"narrative"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if(narrMatch){ try{ result.narrative = JSON.parse('"'+narrMatch[1]+'"'); }catch(e){} }
+  var dateMatch = head.match(/"date"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if(dateMatch){ try{ result.date = JSON.parse('"'+dateMatch[1]+'"'); }catch(e){} }
+  return result;
 }
 
 async function extractFromImageWithVision(apiKey, filename, b64, mimeType, docType, cardId){
   var statusEl = document.getElementById(cardId+"_status");
   try{
     var visionBody = JSON.stringify({
-      model:"claude-sonnet-5", max_tokens:4096,
+      model:"claude-sonnet-5", max_tokens:6144,
       messages:[{role:"user",content:[
         {type:"image",source:{type:"base64",media_type:mimeType,data:b64}},
         {type:"text",text:"Посмотри на изображение медицинского документа и извлеки данные.\n\n"
           +"Верни ТОЛЬКО JSON объект (не массив!) в формате:\n"
-          +'{"markers":[{"name":"...","value":число_или_null,"qualitative":"текст или null","unit":"...","norm":"текст нормы точно как в документе, или null","date":"ГГГГ-ММ-ДД или null"}],"narrative":"текст заключения или null","date":"ГГГГ-ММ-ДД общая дата документа или null"}\n\n'
+          +'{"date":"ГГГГ-ММ-ДД общая дата документа или null","narrative":"текст заключения или null","markers":[{"name":"...","value":число_или_null,"qualitative":"текст или null","unit":"...","norm":"текст нормы точно как в документе, или null","date":"ГГГГ-ММ-ДД или null"}]}\n\n'
+          +"ВАЖНО про порядок полей: пиши date и narrative СНАЧАЛА, markers — ПОСЛЕДНИМ полем. Показателей в таблице может быть много (15-25+), и если ответ обрежется по лимиту длины, важно, чтобы дата и особенно текст заключения (narrative) успели полностью сохраниться — это самая ценная часть документа, её нельзя терять. Если из-за нехватки места придётся сократить что-то — жертвуй последними строками markers, а не narrative.\n\n"
           +"КРИТИЧЕСКИ ВАЖНО про построчное соответствие (частая ошибка — не допускай её):\n"
           +"- Таблицы анализов часто имеют строки, где название показателя переносится на 2 строки (например 'Ширина распределения тромбоцитов по объему, PDW' на двух строках) — это ОДНА строка таблицы, не путай её значение/норму со следующей строкой снизу.\n"
           +"- Перед тем как записать value/norm для показателя, мысленно проведи горизонтальную линию через всю строку таблицы и убедись, что число из колонки 'Результат' и текст из колонки 'Норма' взяты именно с ЭТОЙ строки, а не соседней сверху/снизу.\n"
@@ -3937,6 +3948,14 @@ async function extractFromImageWithVision(apiKey, filename, b64, mimeType, docTy
     // чтобы оно было видно во вкладке "Vault" и участвовало в getVaultContext() для AI-функций
     if(result.narrative && typeof result.narrative === "string" && result.narrative.trim().length > 0){
       appendVaultNarrative(cardId, result.narrative.trim());
+      // Дублируем прямо в карточку загрузки — раньше заключение уходило ТОЛЬКО во вкладку
+      // Vault, и было незаметно, что оно вообще извлеклось (казалось, будто теряется).
+      if(statusEl){
+        var narrEl = document.createElement("div");
+        narrEl.style.cssText = "margin-top:8px;padding:8px 10px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;font-size:12px;color:#4c1d95;white-space:pre-wrap;line-height:1.6";
+        narrEl.innerHTML = "<b>📋 Заключение:</b><br>" + escHtml(result.narrative.trim());
+        statusEl.appendChild(narrEl);
+      }
     }
   }catch(err){
     if(statusEl) statusEl.innerHTML="<span style='color:#f59e0b'>⚠️ "+err.message+"</span>";
