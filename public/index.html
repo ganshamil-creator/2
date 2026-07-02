@@ -1202,7 +1202,7 @@ function buildBioRows(){
         var valueDisplay = isQual
           ? '<span style="font-size:12px;font-weight:600;color:#475569">' + escHtml(last.qualitative||"") + '</span>'
           : '<span style="font-size:12px;font-weight:600;color:#1e293b">' + last.value + ' ' + (last.unit||"") + '</span>';
-        var rangeText = isQual ? "" : getBioRangeText(name);
+        var rangeText = isQual ? "" : getBioRangeText(name, last.docNorm);
         var dateInput = '<input type="date" value="'+last.date+'" onchange="updateBiomarkerDate(\''+name.replace(/'/g,"\\'")+'\',\''+last.date+'\',this.value)" style="font-size:11px;color:#6b7280;padding:2px 4px;border:1px solid #e2e8f0;border-radius:4px;width:118px">'
           + (last.dateGuessed ? '<span title="Дата не найдена в документе — подставлена автоматически, проверь и поправь" style="margin-left:3px">⚠️</span>' : '');
         h += '<tr><td style="padding:4px 8px;font-size:12px;color:#334155;width:40%"><b>' + name + '</b></td>';
@@ -1802,9 +1802,26 @@ var BIO_NAMES_PROMPT_HINT = "- name: используй СТРОГО эти то
   + Object.keys(BIO_NORMS).map(function(n){ return n.indexOf(" ")>-1 ? "'"+n+"'" : n; }).join(", ")
   + ".\n  ВАЖНО: если в документе показатель назван развёрнутым медицинским термином с аббревиатурой в скобках (например 'Аланинаминотрансфераза (АЛТ)') — используй ТОЛЬКО короткую аббревиатуру из списка выше ('АЛТ'), а не полное название.\n  Если показателя нет в этом списке — используй обычное русское название (например: Поверхностный антиген гепатита B (HBsAg), Антитела к вирусу гепатита C (Anti-HCV), Группа крови, RW, ВИЧ и т.п.).\n";
 
-function getBioStatus(name, value){
-  var n = BIO_NORMS[name];
-  if(!n && BIO_NORMS_ALIASES[name]) n = BIO_NORMS[BIO_NORMS_ALIASES[name]];
+// Пытается вытащить числовой диапазон {lo,hi} из текста нормы, как он напечатан в документе
+// (например "4,0 - 9,0" или "130-160"). Возвращает null, если не удалось распарсить —
+// тогда вызывающий код падает на захардкоженную справочную таблицу BIO_NORMS.
+function parseNormRange(normStr){
+  if(!normStr) return null;
+  var s = String(normStr).trim().replace(/,/g, ".");
+  var m = s.match(/(-?\d+(?:\.\d+)?)\s*[-–—]\s*(-?\d+(?:\.\d+)?)/);
+  if(!m) return null;
+  var lo = parseFloat(m[1]), hi = parseFloat(m[2]);
+  if(isNaN(lo) || isNaN(hi)) return null;
+  if(lo > hi){ var t=lo; lo=hi; hi=t; }
+  return {lo:lo, hi:hi};
+}
+
+function getBioStatus(name, value, docNormText){
+  var n = parseNormRange(docNormText);
+  if(!n){
+    n = BIO_NORMS[name];
+    if(!n && BIO_NORMS_ALIASES[name]) n = BIO_NORMS[BIO_NORMS_ALIASES[name]];
+  }
   if(!n) return {color:"#94a3b8", emoji:"⬜", label:"нет нормы"};
   // Некоторые ЭКГ-аппараты выдают интервалы в секундах (0.432) вместо миллисекунд (432).
   // Если норма в мс, а значение похоже на секунды (меньше 10 при норме от десятков/сотен) — конвертируем.
@@ -1821,9 +1838,12 @@ function getBioStatus(name, value){
   return {color:"#16a34a", emoji:"🟢", label:"норма"};
 }
 
-// Возвращает строку с референсным диапазоном показателя (например "120–170 г/л"),
-// или пустую строку, если нормы для этого названия нет ни прямо, ни через алиас.
-function getBioRangeText(name){
+// Возвращает строку с референсным диапазоном показателя (например "120–170 г/л").
+// ПРИОРИТЕТ: если норма пришла из самого документа (docNormText — так, как её распознал Vision AI
+// на бланке анализа) — показываем именно её, это и есть правильная норма для конкретной лаборатории.
+// Захардкоженная таблица BIO_NORMS используется только как запасной вариант, когда AI её не нашёл.
+function getBioRangeText(name, docNormText){
+  if(docNormText && String(docNormText).trim()) return String(docNormText).trim();
   var n = BIO_NORMS[name];
   if(!n && BIO_NORMS_ALIASES[name]) n = BIO_NORMS[BIO_NORMS_ALIASES[name]];
   if(!n) return "";
@@ -3744,8 +3764,10 @@ function handleHealthVaultUpload(files){
           msgsEl.appendChild(card); scrollToBottom();
         }
         if(claudeKey){
-          // Сжимаем изображение до макс 1024px и качество 0.7
-          compressImage(dataUrl, 1024, 0.7).then(function(compressed){
+          // Сжимаем изображение аккуратнее, чем раньше (было 1024px/0.7) — для плотных таблиц
+          // с мелким шрифтом слишком сильное сжатие само по себе провоцирует Vision AI путать
+          // соседние строки и цифры. 1600px/0.85 — тот же уровень, что и в обычном чате.
+          compressImage(dataUrl, 1600, 0.85).then(function(compressed){
             var b64 = compressed.split(",")[1]||"";
             var mime = "image/jpeg";
             var sEl = document.getElementById(cardId+"_status");
@@ -3810,19 +3832,25 @@ async function extractFromImageWithVision(apiKey, filename, b64, mimeType, docTy
   var statusEl = document.getElementById(cardId+"_status");
   try{
     var visionBody = JSON.stringify({
-      model:"claude-haiku-4-5", max_tokens:2000,
+      model:"claude-sonnet-5", max_tokens:2000,
       messages:[{role:"user",content:[
         {type:"image",source:{type:"base64",media_type:mimeType,data:b64}},
         {type:"text",text:"Посмотри на изображение медицинского документа и извлеки данные.\n\n"
           +"Верни ТОЛЬКО JSON объект (не массив!) в формате:\n"
-          +'{"markers":[{"name":"...","value":число_или_null,"qualitative":"текст или null","unit":"...","date":"ГГГГ-ММ-ДД или null"}],"narrative":"текст заключения или null","date":"ГГГГ-ММ-ДД общая дата документа или null"}\n\n'
+          +'{"markers":[{"name":"...","value":число_или_null,"qualitative":"текст или null","unit":"...","norm":"текст нормы точно как в документе, или null","date":"ГГГГ-ММ-ДД или null"}],"narrative":"текст заключения или null","date":"ГГГГ-ММ-ДД общая дата документа или null"}\n\n'
+          +"КРИТИЧЕСКИ ВАЖНО про построчное соответствие (частая ошибка — не допускай её):\n"
+          +"- Таблицы анализов часто имеют строки, где название показателя переносится на 2 строки (например 'Ширина распределения тромбоцитов по объему, PDW' на двух строках) — это ОДНА строка таблицы, не путай её значение/норму со следующей строкой снизу.\n"
+          +"- Перед тем как записать value/norm для показателя, мысленно проведи горизонтальную линию через всю строку таблицы и убедись, что число из колонки 'Результат' и текст из колонки 'Норма' взяты именно с ЭТОЙ строки, а не соседней сверху/снизу.\n"
+          +"- НЕ добавляй показатели, названия которых на изображении нет — если не уверен, что такая строка вообще есть в таблице, не выдумывай её.\n"
+          +"- Если строк много и мелкий шрифт — читай медленно и по одной строке, а не блоками.\n\n"
           +"Правила для markers (структурированные показатели):\n"
           +"- Если это ЭКГ/кардиограмма — извлеки: ЧСС, PQ, QRS, QT, Электрическая ось. Если QTc дан ОДНИМ значением — назови 'QTc'. Если корригированный QT дан ДВУМЯ отдельными значениями по разным формулам (например с пометками (B)/Bazett и (F)/Fridericia) — назови их 'QTc(B)' и 'QTc(F)' отдельно. Указывай value и unit ТОЧНО как в документе (если в документе секунды, напр. 0.432 — value=0.432, unit='с'; если миллисекунды, напр. 432 — value=432, unit='мс'). НЕ конвертируй единицы сам.\n"
           +"- Если это анализ крови/биохимия/моча/гормоны — извлеки ВСЕ показатели, и числовые, и качественные.\n"
           +BIO_NAMES_PROMPT_HINT
           +"- Если в анализе ширина распределения эритроцитов (RDW) дана ОДНИМ значением — назови 'Ширина распределения эритроцитов по объему (RDW)'. Если ДВУМЯ отдельными значениями (одно в фл — это RDW-SD, другое в % — это RDW-CV) — назови их 'RDW-SD (стандартное отклонение ширины распределения эритроцитов)' и 'RDW-CV (коэффициент вариации ширины распределения эритроцитов)' соответственно.\n"
           +"- Для ЧИСЛОВЫХ показателей: value = число, qualitative = null, unit = единица измерения.\n"
-          +"- Для КАЧЕСТВЕННЫХ результатов (вида 'обнаружено'/'не обнаружено', 'положительно'/'отрицательно', результаты посевов на микрофлору, чувствительность к антибиотикам, группа крови): value = null, qualitative = точный текст результата на русском, unit = \"\".\n"
+          +"- norm: перепиши референсный диапазон ТОЧНО как он напечатан в колонке 'Норма'/'Референсные значения' той же строки документа (например '4,0 - 9,0' или '130-160'). НИКОГДА не подставляй общепринятые справочные нормы из своих знаний вместо напечатанной в документе — у разных лабораторий и методов нормы отличаются, важна именно эта, конкретная. Если в документе для этой строки норма не напечатана — norm = null (не выдумывай).\n"
+          +"- Для КАЧЕСТВЕННЫХ результатов (вида 'обнаружено'/'не обнаружено', 'положительно'/'отрицательно', результаты посевов на микрофлору, чувствительность к антибиотикам, группа крови): value = null, qualitative = точный текст результата на русском, unit = \"\", norm = null.\n"
           +"- НЕ пропускай качественные результаты — извлекай их так же, как числовые.\n"
           +"- Если на изображении нет таблицы показателей (например, чистый снимок без подписанных результатов) — markers = [].\n\n"
           +"Правила для narrative (текстовое заключение врача):\n"
@@ -4060,6 +4088,7 @@ function saveParsedBiomarkers(markers, cardId, fallbackDocDate){
     var entry = {date:markerDate, source:cardId, dateGuessed:markerDateGuessed};
     if(isNumeric){
       entry.value = m.value; entry.unit = m.unit||"";
+      if(typeof m.norm === "string" && m.norm.trim()) entry.docNorm = m.norm.trim();
     } else {
       entry.qualitative = m.qualitative.trim(); entry.unit = "";
     }
@@ -4090,8 +4119,9 @@ function saveParsedBiomarkers(markers, cardId, fallbackDocDate){
     var isQualitative = !isNumeric && typeof m.qualitative === "string" && m.qualitative.trim().length > 0;
     if(!isNumeric && !isQualitative) return "";
     if(isNumeric){
-      var st = getBioStatus(m.name, m.value);
-      var range = getBioRangeText(m.name);
+      var docNorm = (typeof m.norm === "string" && m.norm.trim()) ? m.norm.trim() : null;
+      var st = getBioStatus(m.name, m.value, docNorm);
+      var range = getBioRangeText(m.name, docNorm);
       return "<div style='display:flex;align-items:center;gap:6px;padding:2px 0'>"
         +"<span>"+st.emoji+"</span>"
         +"<span style='font-size:12px;color:#334155;flex:1'>"+m.name+"</span>"
