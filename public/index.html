@@ -3061,9 +3061,20 @@ function formatClaudeContentBlocks(content){
     try{
       if(b.type==="text"){
         out+=(b.text||"");
-      } else if(typeof b.type==="string" && b.type.includes("tool_use") && b.name==="code_execution"){
-        const cmd=(b.input&&(b.input.command||b.input.code))||JSON.stringify(b.input||{});
-        out+="\n\n```\n"+cmd+"\n```\n";
+      } else if(typeof b.type==="string" && b.type.includes("tool_use")){
+        const inp=b.input||{};
+        if(inp.command==="create" && typeof inp.file_text==="string"){
+          // Инструмент code_execution создаёт файл со скриптом перед запуском —
+          // показываем сам код, а не служебную команду "create"
+          out+="\n\n📄 `"+(inp.path||"файл")+"`:\n```\n"+inp.file_text+"\n```\n";
+        } else if(typeof inp.command==="string" && inp.command!=="create" && ["view","str_replace","insert"].includes(inp.command)){
+          // Служебные файловые операции (просмотр/правка) — не несут пользы для показа, пропускаем
+        } else if(typeof inp.command==="string"){
+          out+="\n\n```bash\n"+inp.command+"\n```\n";
+        } else if(typeof inp.code==="string"){
+          out+="\n\n```\n"+inp.code+"\n```\n";
+        }
+        // Иначе — неизвестная служебная команда инструмента, молча пропускаем (не дампим сырой JSON)
       } else if(typeof b.type==="string" && b.type.includes("tool_result")){
         const c=b.content;
         let txt="";
@@ -3074,12 +3085,18 @@ function formatClaudeContentBlocks(content){
           if(c.stdout) txt+=c.stdout;
           if(c.stderr) txt+=(txt?"\n":"")+"[stderr] "+c.stderr;
           if(!txt&&c.error_code) txt="[ошибка выполнения кода: "+c.error_code+"]";
-          if(!txt) txt=JSON.stringify(c).slice(0,2000);
+          // Если это просто служебное подтверждение файловой операции (нет stdout/stderr/ошибки) —
+          // молча пропускаем, а не дампим сырой JSON вида {"type":"...create_result",...} в чат
         }
         if(txt) out+="\n```\n"+txt.trim()+"\n```\n";
       }
     }catch(_){}
   }
+  // Подстраховка: если служебный JSON инструмента (вида {"type":"...execution...result",...})
+  // всё же просочился прямо внутрь текстового блока (а не пришёл отдельным tool_result блоком,
+  // который мы уже фильтруем выше) — вырезаем его регуляркой, чтобы он точно не долетел до чата.
+  out = out.replace(/```\s*\n?\{"type":"[a-z_]*(?:execution|tool)[a-z_]*"[^`]*?\}\s*\n?```/gi, "")
+           .replace(/\{"type":"[a-z_]*(?:execution|tool)[a-z_]*"\s*,\s*"is_file_update":\s*(?:true|false)\}/gi, "");
   return out.trim();
 }
 
