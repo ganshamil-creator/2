@@ -846,7 +846,7 @@ const ALL_AGENTS = [
    system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."+FILE_EXPORT_NOTE},
   {id:"deepseek",  name:"DeepSeek",   emoji:"⚡", color:"#06b6d4", badge:"V4",
    system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста."+FILE_EXPORT_NOTE},
-  {id:"kimi",      name:"Kimi",       emoji:"🔵", color:"#3b82f6", badge:"K2.7 Code",
+  {id:"kimi",      name:"Kimi",       emoji:"🔵", color:"#3b82f6", badge:"K2.6",
    system:"Ты Kimi от Moonshot AI. Специализируешься на креативных задачах, финансовых расчётах и анализе длинных документов. Давай нестандартные практичные решения. Если есть контекст от предыдущих агентов — используй его и дополни своим уникальным взглядом. Используй дату из контекста."+FILE_EXPORT_NOTE},
   {id:"gpt",       name:"GPT-5.4",     emoji:"🟢", color:"#10a779", badge:"5.4 mini",
    system:"Ты GPT-5.4 от OpenAI. Давай практичные пошаговые решения и конкретные рекомендации. Специализируешься на прикладных задачах, инструкциях и советах. Если есть контекст от предыдущих агентов — обогати его практическими советами. Используй дату из контекста."+FILE_EXPORT_NOTE},
@@ -3128,30 +3128,38 @@ async function callKimi(key, system, history){
     // из примера curl) — убираем этот префикс, иначе заголовок получится "Bearer Bearer sk-..."
     // и API вернёт Invalid Authentication даже с правильным ключом.
     const cleanKey=key.replace(/^Bearer\s+/i,"").trim();
-    const hasImages=history.some(m=>Array.isArray(m.content)&&m.content.some(c=>c.type==="image_url"));
-    // ВАЖНО: у Kimi два РАЗНЫХ продукта с несовместимыми ключами/адресами —
-    // "Kimi Open Platform" (api.moonshot.ai/.cn, api.kimi.ai) и отдельный "Kimi Code"
-    // (api.kimi.com/coding/v1) — именно там живут модели вида *-code, включая k2.7-code.
-    // Ключ от одного продукта не работает с адресом другого — отсюда Invalid Authentication
-    // даже с правильным свежим ключом. Пробуем сначала Kimi Code с k2.7-code (если нет картинок),
-    // и если не получилось — надёжно откатываемся на обычный Open Platform с k2.6.
-    const attempts=hasImages ? [] : [
-      {url:"https://api.kimi.com/coding/v1/chat/completions", model:"kimi-k2.7-code"},
-      {url:"https://api.kimi.com/coding/v1/chat/completions", model:"kimi-k2-7-code"}
-    ];
-    attempts.push(
-      {url:"https://api.moonshot.ai/v1/chat/completions", model:"kimi-k2.6"},
+    // РАНЬШЕ здесь первыми двумя попытками хаб всегда стучался в api.kimi.com/coding/v1 —
+    // это ОТДЕЛЬНЫЙ продукт "Kimi Code" со своими ключами. Обычный ключ с platform.moonshot.ai
+    // там гарантированно не подходит — то есть при каждом сообщении с Kimi хаб сначала дважды
+    // гарантированно ловил Invalid Authentication, и только потом (если вообще доходило) шёл на
+    // рабочий адрес. Это и есть причина "часто не работает". Теперь бьём сразу в надёжный адрес.
+    const primary={url:"https://api.moonshot.ai/v1/chat/completions", model:"kimi-k2.6"};
+    const mirrors=[
       {url:"https://api.kimi.ai/v1/chat/completions",     model:"kimi-k2.6"},
       {url:"https://api.moonshot.cn/v1/chat/completions", model:"kimi-k2.6"}
-    );
-    let d=null, lastErr=null;
-    for(const {url,model} of attempts){
+    ];
+    async function tryEndpoint(url, model){
       const kimiBody=JSON.stringify({model,max_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
-      try{
-        const resp=await proxyFetch(url,{"Authorization":"Bearer "+cleanKey},kimiBody);
-        if(resp && !resp.error){ d=resp; break; }
-        lastErr=(resp&&resp.error&&(resp.error.message||JSON.stringify(resp.error)))||"Неизвестная ошибка";
-      }catch(e){ lastErr=e.message; }
+      const resp=await proxyFetch(url,{"Authorization":"Bearer "+cleanKey},kimiBody);
+      if(resp && resp.error) throw new Error(resp.error.message||JSON.stringify(resp.error));
+      return resp;
+    }
+    const isAuthError=msg=>/invalid.*auth|invalid.*api.?key|unauthoriz/i.test(msg||"");
+    let d=null, lastErr=null;
+    try{
+      d=await tryEndpoint(primary.url, primary.model);
+    }catch(e){
+      lastErr=e.message;
+      if(isAuthError(lastErr)){
+        // Ошибка авторизации — пробовать зеркала тем же ключом бессмысленно, они дадут тот же
+        // результат (это один и тот же аккаунт). Сразу даём понятную причину вместо повторов.
+        throw new Error("Ключ Kimi не принят (Invalid Authentication). Проверь на platform.moonshot.ai: 1) ключ скопирован полностью, без пробелов и без 'Bearer '; 2) на счету есть баланс — Moonshot требует минимальное пополнение $1, иначе ключ не активен; 3) это ключ именно Kimi Open Platform (platform.moonshot.ai), а не отдельного продукта Kimi Code.");
+      }
+      // Не авторизационная ошибка (сеть/таймаут/перегрузка) — здесь зеркала реально могут помочь
+      for(const m of mirrors){
+        try{ d=await tryEndpoint(m.url, m.model); lastErr=null; break; }
+        catch(e2){ lastErr=e2.message; }
+      }
     }
     if(!d) throw new Error(lastErr||"Kimi: ни один эндпоинт не ответил");
     return (d.choices[0].message.content||"").trim();
