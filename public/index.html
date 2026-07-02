@@ -3104,7 +3104,12 @@ async function callClaude(key, system, history, onChunk, forceModel){
   return callWithRetry(async()=>{
     const model=forceModel||pickClaudeModel(history);
     const useCodeExec = typeof codeExecEnabled!=="undefined" && codeExecEnabled;
-    const bodyObj={model,max_tokens:calcTokens(history),system,messages:history,stream:!isMobile&&!useCodeExec};
+    // При включённом code_execution в тот же max_tokens бюджет упаковывается не только текст
+    // ответа, но и сам код, служебные блоки вызова инструмента и вывод выполнения — обычной
+    // логики calcTokens() (1500-8000 для чата) на это часто не хватает, ответ обрывался
+    // на полуслове. Даём отдельный, заведомо щедрый бюджет именно для этого режима.
+    const maxTok = useCodeExec ? 12000 : calcTokens(history);
+    const bodyObj={model,max_tokens:maxTok,system,messages:history,stream:!isMobile&&!useCodeExec};
     if(useCodeExec) bodyObj.tools=[{type:"code_execution_20250825",name:"code_execution"}];
     const body=JSON.stringify(bodyObj);
     if(isMobile||useCodeExec){
