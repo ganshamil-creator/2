@@ -4341,6 +4341,8 @@ async function sendQuick(text, inp){
     <div style="display:flex;gap:6px;margin-top:12px;padding-top:10px;border-top:1px solid #f1f5f9;flex-wrap:wrap">
       <button onclick="copyText('${turnId}_text')" style="padding:4px 10px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;cursor:pointer">📋 Копировать</button>
       <button class="export-tool" onclick="exportWord('${turnId}')" style="padding:4px 10px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📝 Word</button>
+      <button onclick="exportExcel('${turnId}')" style="padding:4px 10px;background:#1a4731;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📊 Excel</button>
+      <button onclick="makeReveal('${turnId}')" style="padding:4px 10px;background:#4c1d95;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">🎭 Слайды</button>
       <button onclick="exportTxt('${turnId}')" style="padding:4px 10px;background:#374151;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📄 TXT</button>
     </div>
   </div>`;
@@ -4435,12 +4437,13 @@ async function sendFirst(){
     <div id="${turnId}_text" style="font-size:15px;line-height:1.8;color:#1e293b">Гонка агентов...</div>
     <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap">
       <button onclick="copyText('${turnId}_text')" style="padding:4px 10px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;cursor:pointer">📋 Копировать</button>
-      <button onclick="exportWord('${turnId}_text')" style="padding:4px 10px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📝 Word</button>
-      <button onclick="exportExcel('${turnId}_text')" style="padding:4px 10px;background:#1a4731;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📊 Excel</button>
-      <button onclick="fillPdfFromAnswer('${turnId}_text')" style="padding:4px 10px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📝 Заполнить PDF</button>
-      <button onclick="openGamma('${turnId}_text')" style="padding:4px 9px;background:#f3f0ff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:6px;font-size:11px;cursor:pointer">🟣 Gamma</button>
-      <button onclick="openCanva('${turnId}_text')" style="padding:4px 9px;background:#fff0f0;color:#e03131;border:1px solid #fca5a5;border-radius:6px;font-size:11px;cursor:pointer">🎨 Canva</button>
-      <button onclick="openSlideMaker('${turnId}_text')" style="padding:4px 9px;background:#f0fdf4;color:#16a34a;border:1px solid #22c55e33;border-radius:6px;font-size:11px;cursor:pointer">🆓 SlideMaker</button>
+      <button onclick="exportWord('${turnId}')" style="padding:4px 10px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📝 Word</button>
+      <button onclick="exportExcel('${turnId}')" style="padding:4px 10px;background:#1a4731;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📊 Excel</button>
+      <button onclick="makeReveal('${turnId}')" style="padding:4px 10px;background:#4c1d95;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">🎭 Слайды</button>
+      <button onclick="fillPdfFromAnswer('${turnId}')" style="padding:4px 10px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📝 Заполнить PDF</button>
+      <button onclick="openGamma('${turnId}')" style="padding:4px 9px;background:#f3f0ff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:6px;font-size:11px;cursor:pointer">🟣 Gamma</button>
+      <button onclick="openCanva('${turnId}')" style="padding:4px 9px;background:#fff0f0;color:#e03131;border:1px solid #fca5a5;border-radius:6px;font-size:11px;cursor:pointer">🎨 Canva</button>
+      <button onclick="openSlideMaker('${turnId}')" style="padding:4px 9px;background:#f0fdf4;color:#16a34a;border:1px solid #22c55e33;border-radius:6px;font-size:11px;cursor:pointer">🆓 SlideMaker</button>
     </div>
   </div>`;
   document.getElementById("messages").appendChild(el);
@@ -5061,6 +5064,7 @@ function appendTurnContainer(turnId, agents, cols){
   h+=`<span style="font-size:11px;color:#94a3b8;align-self:center">💾</span>`;
   h+=`<button class="export-tool" onclick="exportWord('${turnId}')" style="padding:4px 10px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📝 Word</button>`;
   h+=`<button class="export-tool" onclick="exportExcel('${turnId}')" style="padding:4px 10px;background:#1a4731;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📊 Excel</button>`;
+  h+=`<button class="export-tool" onclick="makeReveal('${turnId}')" style="padding:4px 10px;background:#4c1d95;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">🎭 Слайды</button>`;
   h+=`<button class="export-tool" onclick="fillPdfFromAnswer('${turnId}')" style="padding:4px 10px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📝 Заполнить PDF</button>`;
 
   h+=`</div>`;
@@ -5302,6 +5306,7 @@ function renderMessages(){
   h+=`<span style="font-size:11px;color:#94a3b8;align-self:center">💾</span>`;
   h+=`<button onclick="exportWord('${tid}')" style="padding:4px 10px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📝 Word</button>`;
   h+=`<button onclick="exportExcel('${tid}')" style="padding:4px 10px;background:#1a4731;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📊 Excel</button>`;
+  h+=`<button onclick="makeReveal('${tid}')" style="padding:4px 10px;background:#4c1d95;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">🎭 Слайды</button>`;
   h+=`<button onclick="fillPdfFromAnswer('${tid}')" style="padding:4px 10px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📝 Заполнить PDF</button>`;
   h+=`<button onclick="exportTxt('${tid}')" style="padding:4px 10px;background:#374151;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer">📄 TXT</button>`;
 
@@ -5348,7 +5353,7 @@ function openSlideMaker(turnId){
 }
 
 async function makeReveal(turnId){
-  const el=document.getElementById(turnId+"_consolidated");
+  const el=document.getElementById(turnId+"_consolidated")||document.getElementById(turnId+"_text");
   if(!el) return;
   const text=el.dataset.raw||el.textContent;
   const chat=getChat();
@@ -5661,7 +5666,7 @@ ${content}
 
 
 function getExportContent(turnId){
-  const el=document.getElementById(turnId+"_consolidated");
+  const el=document.getElementById(turnId+"_consolidated")||document.getElementById(turnId+"_text");
   const chat=getChat();
   return {text:el?.dataset?.raw||el?.innerText||"", title:chat?.title||"AI Multi-Hub", date:new Date().toLocaleDateString("ru-RU")};
 }
