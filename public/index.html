@@ -2613,12 +2613,7 @@ async function extractClinicalTermsFromLastAnswer(biomarkerNames){
     if(isMobile){
       data = await proxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, body);
     } else {
-      var resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type":"application/json", "x-api-key": keys.claude, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
-        body: body
-      });
-      data = await resp.json();
+      data = await directOrProxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, body);
     }
     var rtext = (data.content&&data.content[0]&&data.content[0].text)||"{}";
     rtext = rtext.replace(/```json|```/g,"").trim();
@@ -2910,12 +2905,7 @@ async function summarizeOldMessages(oldMessages){
     if(isMobile){
       data = await proxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, body);
     } else {
-      var resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST",
-        headers:{"Content-Type":"application/json","x-api-key":keys.claude,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body: body
-      });
-      data = await resp.json();
+      data = await directOrProxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, body);
     }
     if(data.error) return null;
     return (data.content && data.content[0] && data.content[0].text) || null;
@@ -3028,6 +3018,26 @@ async function proxyFetch(url, headers, body){
 }
 
 const isMobile = /Android|iPhone|iPad|iPod|Mobile|SamsungBrowser/i.test(navigator.userAgent);
+
+// Единая обёртка для служебных (не-стриминговых) запросов к Anthropic из вспомогательных
+// функций (суммаризация диалога, извлечение фактов, OCR-фолбэк, Vision-парсинг документов и т.п.).
+// Сначала пробуем прямой fetch из браузера (быстрее), и только если он падает с сетевой ошибкой
+// ("Failed to fetch" — типичная ситуация в РФ без VPN, когда api.anthropic.com заблокирован
+// на уровне провайдера) — откатываемся на прокси-Cloud Function. Без этого отката все эти
+// вспомогательные функции раньше просто падали с "Failed to fetch" на десктопе без VPN,
+// даже когда callClaude() для основного чата уже был этой проблемы починен.
+async function directOrProxyFetch(url, headers, body){
+  try{
+    var resp = await fetch(url, {
+      method:"POST",
+      headers: Object.assign({"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"}, headers),
+      body: body
+    });
+    return await resp.json();
+  }catch(directErr){
+    return await proxyFetch(url, headers, body);
+  }
+}
 
 async function callOpenAI(key, system, history){
   return callWithRetry(async()=>{
@@ -3547,12 +3557,7 @@ async function transcribePageWithVision(apiKey, b64, mimeType){
     if(isMobile){
       data=await proxyFetch("https://api.anthropic.com/v1/messages",{"x-api-key":apiKey,"anthropic-version":"2023-06-01"},body);
     } else {
-      var resp=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:body
-      });
-      data=await resp.json();
+      data=await directOrProxyFetch("https://api.anthropic.com/v1/messages",{"x-api-key":apiKey,"anthropic-version":"2023-06-01"},body);
     }
     if(data.error) return null;
     var txt=(data.content||[]).map(function(b){return b.text||"";}).join("").trim();
@@ -3982,12 +3987,7 @@ async function extractFromImageWithVision(apiKey, filename, b64, mimeType, docTy
     if(isMobile){
       data = await proxyFetch("https://api.anthropic.com/v1/messages", visionHeaders, visionBody);
     } else {
-      var resp = await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body: visionBody
-      });
-      data = await resp.json();
+      data = await directOrProxyFetch("https://api.anthropic.com/v1/messages", visionHeaders, visionBody);
     }
     if(data.error) throw new Error(data.error.message);
     var txt = (data.content||[]).map(function(b){return b.text||"";}).join("").trim().replace(/```json|```/g,"").trim();
@@ -4315,12 +4315,7 @@ async function extractBiomarkersWithAI(apiKey, filename, text, docType, cardId){
     if(isMobile){
       data = await proxyFetch("https://api.anthropic.com/v1/messages", extractHeaders, extractBody);
     } else {
-      var resp2 = await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body: extractBody
-      });
-      data = await resp2.json();
+      data = await directOrProxyFetch("https://api.anthropic.com/v1/messages", extractHeaders, extractBody);
     }
     if(data.error) throw new Error(data.error.message);
 
@@ -7066,12 +7061,7 @@ async function extractFactsFromDialog(messages){
     if(isMobile){
       data = await proxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, extractBody);
     } else {
-      var resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type":"application/json", "x-api-key": keys.claude, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
-        body: extractBody
-      });
-      data = await resp.json();
+      data = await directOrProxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, extractBody);
     }
     var text = (data.content&&data.content[0]&&data.content[0].text)||"[]";
     text = text.replace(/```json|```/g,"").trim();
@@ -7142,12 +7132,7 @@ async function dedupFactsNow(){
     if(isMobile){
       data = await proxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, body);
     } else {
-      var resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type":"application/json", "x-api-key": keys.claude, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
-        body: body
-      });
-      data = await resp.json();
+      data = await directOrProxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, body);
     }
     var text = (data.content&&data.content[0]&&data.content[0].text)||"[]";
     text = text.replace(/```json|```/g,"").trim();
