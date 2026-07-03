@@ -4445,7 +4445,11 @@ async function sendQuick(text, inp){
     if(f.text){
       var mdt = healthMode ? detectMedDocType(f.name, f.text) : null;
       var typeLabel = mdt ? "["+mdt.type+": "+f.name+"]" : "["+f.name+"]";
-      fileCtx+="\n"+typeLabel+"\n"+f.text.slice(0,10000)+"\n";
+      // Лимит был 10000 символов — для больших файлов (например, исходники самого хаба,
+      // сотни КБ) это обрезало содержимое до нескольких первых функций, и агент физически
+      // не видел остальной код. 200000 символов (~450-500 КБ) с запасом покрывает такие файлы,
+      // оставаясь в пределах контекстного окна модели.
+      fileCtx+="\n"+typeLabel+"\n"+f.text.slice(0,200000)+(f.text.length>200000?"\n...[обрезано]":"")+"\n";
     }
   }
   if(imageFiles.length>0){
@@ -4951,7 +4955,9 @@ async function send(){
     for(const f of otherFiles){
       fileCtx+="\n[Файл: "+f.name+"]\n";
       if(f.text){
-        fileCtx+=f.text.slice(0,12000)+(f.text.length>12000?"\n...[обрезано]":"")+"\n";
+        // Тот же лимит, что и в Quick Mode — поднят с 12000 до 200000 символов, чтобы большие
+        // исходники (например, index.html самого хаба) не обрезались до нескольких первых функций.
+        fileCtx+=f.text.slice(0,200000)+(f.text.length>200000?"\n...[обрезано]":"")+"\n";
         if(needTranslation) fileCtx+="\n[ЗАДАЧА: ПЕРЕВЕДИ ВЕСЬ ТЕКСТ ВЫШЕ НА ЗАПРОШЕННЫЙ ЯЗЫК ПОЛНОСТЬЮ И ТОЧНО]\n";
       } else {
         fileCtx+="[содержимое не извлечено]\n";
