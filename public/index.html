@@ -3036,13 +3036,21 @@ async function callOpenAI(key, system, history){
     if(isMobile){
       d=await proxyFetch("https://api.openai.com/v1/chat/completions",{"Authorization":"Bearer "+key},body);
     } else {
-      const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),90000);
-      const r=await fetch("https://api.openai.com/v1/chat/completions",{
-        method:"POST",signal:ctrl.signal,
-        headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},
-        body
-      });
-      clearTimeout(t); d=await r.json();
+      try{
+        const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),90000);
+        const r=await fetch("https://api.openai.com/v1/chat/completions",{
+          method:"POST",signal:ctrl.signal,
+          headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},
+          body
+        });
+        clearTimeout(t); d=await r.json();
+      }catch(directErr){
+        // Прямой запрос из браузера может быть заблокирован на уровне сети/провайдера
+        // (например в РФ без VPN) — "Failed to fetch" в этом случае значит именно это,
+        // и повторять тот же прямой запрос бессмысленно. Откатываемся на прокси
+        // (Cloud Function идёт с серверов Google, а не с IP пользователя).
+        d=await proxyFetch("https://api.openai.com/v1/chat/completions",{"Authorization":"Bearer "+key},body);
+      }
     }
     if(d.error) throw new Error(d.error.message);
     return d.choices[0].message.content.trim();
@@ -3153,43 +3161,52 @@ async function callClaude(key, system, history, onChunk, forceModel){
     }
     const bodySize=body.length;
     const claudeTimeout=bodySize>100000?180000:bodySize>30000?120000:60000;
-    const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),claudeTimeout);
-    const r=await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",signal:ctrl.signal,
-      headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body
-    });
-    clearTimeout(t);
-    if(!r.ok){ const e=await r.json(); throw new Error(e.error?.message||r.statusText); }
-    // SSE стриминг
-    const reader=r.body.getReader(); const dec=new TextDecoder(); let full="";
-    while(true){
-      const {done,value}=await reader.read(); if(done) break;
-      const chunk=dec.decode(value,{stream:true});
-      for(const line of chunk.split("\n")){
-        if(!line.startsWith("data:")) continue;
-        const data=line.slice(5).trim();
-        if(data==="[DONE]"||!data) continue;
-        try{
-          const j=JSON.parse(data);
-          const delta=j.delta?.text||(j.type==="content_block_delta"?j.delta?.text:"") || "";
-          if(delta){ full+=delta; if(onChunk) onChunk(full); }
-          else if(j.type==="message_start"&&onChunk&&!full) onChunk("⏳");
-        }catch(_){}
-      }
-    }
-    // Если стриминг вернул пустую строку — fallback без стриминга
-    if(!full.trim()){
-      const r2=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
+    try{
+      const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),claudeTimeout);
+      const r=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",signal:ctrl.signal,
         headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({...bodyObj,stream:false})
+        body
       });
-      if(!r2.ok){ const e=await r2.json(); throw new Error(e.error?.message||r2.statusText); }
-      const d2=await r2.json();
-      return (d2.content||[]).map(b=>b.text||"").join("").trim();
+      clearTimeout(t);
+      if(!r.ok){ const e=await r.json(); throw new Error(e.error?.message||r.statusText); }
+      // SSE стриминг
+      const reader=r.body.getReader(); const dec=new TextDecoder(); let full="";
+      while(true){
+        const {done,value}=await reader.read(); if(done) break;
+        const chunk=dec.decode(value,{stream:true});
+        for(const line of chunk.split("\n")){
+          if(!line.startsWith("data:")) continue;
+          const data=line.slice(5).trim();
+          if(data==="[DONE]"||!data) continue;
+          try{
+            const j=JSON.parse(data);
+            const delta=j.delta?.text||(j.type==="content_block_delta"?j.delta?.text:"") || "";
+            if(delta){ full+=delta; if(onChunk) onChunk(full); }
+            else if(j.type==="message_start"&&onChunk&&!full) onChunk("⏳");
+          }catch(_){}
+        }
+      }
+      // Если стриминг вернул пустую строку — fallback без стриминга
+      if(!full.trim()){
+        const r2=await fetch("https://api.anthropic.com/v1/messages",{
+          method:"POST",
+          headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+          body:JSON.stringify({...bodyObj,stream:false})
+        });
+        if(!r2.ok){ const e=await r2.json(); throw new Error(e.error?.message||r2.statusText); }
+        const d2=await r2.json();
+        return (d2.content||[]).map(b=>b.text||"").join("").trim();
+      }
+      return full.trim();
+    }catch(directErr){
+      // "Failed to fetch" здесь значит, что прямое соединение с api.anthropic.com
+      // заблокировано на уровне сети/провайдера (частая ситуация в РФ без VPN) — повторять
+      // тот же прямой запрос бессмысленно. Откатываемся на прокси (без стриминга, но доходит).
+      const d=await proxyFetch("https://api.anthropic.com/v1/messages",{"x-api-key":key,"anthropic-version":"2023-06-01"},{...bodyObj,stream:false});
+      if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
+      return (d.content||[]).map(b=>b.text||"").join("").trim();
     }
-    return full.trim();
   });
 }
 
@@ -3357,30 +3374,42 @@ async function callDeepSeek(key, system, history, onChunk){
       if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
       return d.choices[0].message.content.trim();
     }
-    const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),90000);
-    const r=await fetch("https://api.deepseek.com/chat/completions",{
-      method:"POST",signal:ctrl.signal,
-      headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},
-      body:dsBody
-    });
-    clearTimeout(t);
-    if(!r.ok){ const e=await r.json(); throw new Error(e.error?.message||r.statusText); }
-    const reader=r.body.getReader(); const dec=new TextDecoder(); let full="";
-    while(true){
-      const {done,value}=await reader.read(); if(done) break;
-      const chunk=dec.decode(value,{stream:true});
-      for(const line of chunk.split("\n")){
-        if(!line.startsWith("data:")) continue;
-        const data=line.slice(5).trim();
-        if(data==="[DONE]"||!data) continue;
-        try{
-          const j=JSON.parse(data);
-          const delta=j.choices?.[0]?.delta?.content||"";
-          if(delta){ full+=delta; if(onChunk) onChunk(full); }
-        }catch(_){}
+    try{
+      const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),90000);
+      const r=await fetch("https://api.deepseek.com/chat/completions",{
+        method:"POST",signal:ctrl.signal,
+        headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},
+        body:dsBody
+      });
+      clearTimeout(t);
+      if(!r.ok){ const e=await r.json(); throw new Error(e.error?.message||r.statusText); }
+      const reader=r.body.getReader(); const dec=new TextDecoder(); let full="";
+      while(true){
+        const {done,value}=await reader.read(); if(done) break;
+        const chunk=dec.decode(value,{stream:true});
+        for(const line of chunk.split("\n")){
+          if(!line.startsWith("data:")) continue;
+          const data=line.slice(5).trim();
+          if(data==="[DONE]"||!data) continue;
+          try{
+            const j=JSON.parse(data);
+            const delta=j.choices?.[0]?.delta?.content||"";
+            if(delta){ full+=delta; if(onChunk) onChunk(full); }
+          }catch(_){}
+        }
       }
+      return full.trim();
+    }catch(directErr){
+      // "Failed to fetch" здесь означает, что прямое соединение с api.deepseek.com
+      // заблокировано на уровне сети (частая ситуация в РФ без VPN) — повторять тот же
+      // прямой запрос бессмысленно, откатываемся на прокси (без стриминга, зато доходит).
+      // Если ошибка была не сетевая, а настоящая ошибка API (неверный ключ и т.п.) —
+      // прокси всё равно вернёт ровно ту же ошибку, так что просто пробуем.
+      const dNoStream=JSON.stringify({model:"deepseek-v4-flash",max_tokens:calcTokens(msgs),stream:false,messages:[{role:"system",content:system},...msgs]});
+      const d=await proxyFetch("https://api.deepseek.com/chat/completions",{"Authorization":"Bearer "+key},dNoStream);
+      if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
+      return d.choices[0].message.content.trim();
     }
-    return full.trim();
   });
 }
 
