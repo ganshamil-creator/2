@@ -1806,12 +1806,19 @@ var BIO_NAMES_PROMPT_HINT = "- name: используй СТРОГО эти то
 // (например "4,0 - 9,0" или "130-160"). Возвращает null, если не удалось распарсить —
 // тогда вызывающий код падает на захардкоженную справочную таблицу BIO_NORMS.
 function parseNormRange(normStr){
-  if(!normStr) return null;
-  var s = String(normStr).trim().replace(/,/g, ".");
-  var m = s.match(/(-?\d+(?:\.\d+)?)\s*[-–—]\s*(-?\d+(?:\.\d+)?)/);
+  if(typeof normStr !== "string" || !normStr.trim()) return null;
+  var s = normStr.trim()
+    .replace(/,/g, ".")
+    .replace(/[\u2212\u2013\u2014]/g, "-"); // юникод-минус (−) и en/em-тире (–—) → обычный дефис
+                                              // (частый гость в тексте, скопированном из PDF/OCR)
+  // Экспоненциальную запись (напр. "1e3-2e3") не поддерживаем намеренно — без этой проверки
+  // регулярка ниже "откусывала" середину такой строки и тихо возвращала неверные границы
+  // вместо ошибки. Лучше явный null, чем незаметно неправильная норма.
+  if(/\d\s*[eE][+-]?\d/.test(s)) return null;
+  var m = s.match(/(?:^|[^\d.])([+-]?\d+(?:\.\d+)?)\s*-\s*([+-]?\d+(?:\.\d+)?)(?:[^\d.]|$)/);
   if(!m) return null;
   var lo = parseFloat(m[1]), hi = parseFloat(m[2]);
-  if(isNaN(lo) || isNaN(hi)) return null;
+  if(isNaN(lo) || isNaN(hi) || !isFinite(lo) || !isFinite(hi)) return null;
   if(lo > hi){ var t=lo; lo=hi; hi=t; }
   return {lo:lo, hi:hi};
 }
