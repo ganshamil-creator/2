@@ -795,6 +795,43 @@ let chats = loadChats();
 if(!chats.length) chats=[makeChat()];
 let activeChatId = chats[0].id;
 let thinking = false;
+let wakeLock = null;
+
+// Пока хаб ждёт ответ от AI — держим экран включённым (Screen Wake Lock API), чтобы телефон
+// не заблокировался по таймауту в процессе ожидания. ВАЖНО: это решает только сценарий
+// "экран погас от бездействия, пока я жду ответ" — если ты сам сворачиваешь браузер в другое
+// приложение или устройство реально уходит в сон, Wake Lock тут не поможет (это системные
+// ограничения ОС, которые ни один сайт не может обойти). Поддерживается не во всех браузерах
+// (Safari на iOS — нет), поэтому оборачиваем в try/catch и тихо игнорируем, если недоступно.
+function startThinking(){
+  thinking=true;
+  try{
+    if("wakeLock" in navigator){
+      navigator.wakeLock.request("screen").then(function(lock){ wakeLock=lock; }).catch(function(){});
+    }
+  }catch(e){}
+}
+
+function stopThinking(){
+  thinking=false;
+  if(wakeLock){
+    try{ wakeLock.release().catch(function(){}); }catch(e){}
+    wakeLock=null;
+  }
+}
+
+// Браузер автоматически снимает Wake Lock при переключении вкладки/приложения (это его
+// стандартное поведение, обойти нельзя) — но если пользователь вернулся, а ответ ещё не
+// пришёл, стоит захватить его повторно, чтобы экран снова не гас пока ждём.
+document.addEventListener("visibilitychange", function(){
+  if(document.visibilityState==="visible" && thinking && !wakeLock){
+    try{
+      if("wakeLock" in navigator){
+        navigator.wakeLock.request("screen").then(function(lock){ wakeLock=lock; }).catch(function(){});
+      }
+    }catch(e){}
+  }
+});
 let currentFiles = [];
 let searchEnabled = false;
 let codeExecEnabled = false;
@@ -4493,7 +4530,7 @@ async function sendQuick(text, inp){
   saveChats(chats);
   appendUserBubble(text,filesToSend);
   inp.value=""; inp.style.height="auto";
-  thinking=true;
+  startThinking();
   document.getElementById("sendBtn").disabled=true;
   document.getElementById("sendBtn").style.background="#374151";
 
@@ -4534,7 +4571,7 @@ async function sendQuick(text, inp){
   }
   saveChats(chats);
   clearFiles();
-  thinking=false;
+  stopThinking();
   document.getElementById("sendBtn").disabled=false;
   document.getElementById("sendBtn").style.background="linear-gradient(135deg,#6366f1,#8b5cf6)";
   scrollToBottom();
@@ -4590,7 +4627,7 @@ async function sendFirst(){
   appendUserBubble(text,filesToSend);
   currentFiles=[]; renderFilePreview();
   inp.value=""; inp.style.height="auto";
-  thinking=true;
+  startThinking();
   document.getElementById("sendBtn").disabled=true;
   document.getElementById("sendBtn").style.background="#374151";
 
@@ -4658,7 +4695,7 @@ async function sendFirst(){
     if(textEl) textEl.innerHTML="<span style='color:#ef4444'>Ни один агент не ответил</span>";
   }
 
-  thinking=false;
+  stopThinking();
   document.getElementById("sendBtn").disabled=false;
   document.getElementById("sendBtn").style.background="linear-gradient(135deg,#6366f1,#8b5cf6)";
   scrollToBottom();
@@ -4697,7 +4734,7 @@ async function sendChain(text, inp){
   appendUserBubble(text,filesToSend);
   currentFiles=[]; renderFilePreview();
   inp.value=""; inp.style.height="auto";
-  thinking=true;
+  startThinking();
   document.getElementById("sendBtn").disabled=true;
   document.getElementById("sendBtn").style.background="#374151";
 
@@ -4760,7 +4797,7 @@ async function sendChain(text, inp){
   const okRound1=agents.filter(a=>round1[a.id]?.status==="ok");
   if(!okRound1.length){
     updateConsolidated(turnId,"Ни один агент не ответил в раунде 1.","","⚖️ Дебаты не состоялись");
-    thinking=false;
+    stopThinking();
     document.getElementById("sendBtn").disabled=false;
     document.getElementById("sendBtn").style.background="linear-gradient(135deg,#6366f1,#8b5cf6)";
     return;
@@ -4835,7 +4872,7 @@ async function sendChain(text, inp){
   chat.messages.push({role:"assistant",content:consensus,agentResults:round3,debateMode:true,ts:Date.now()});
   saveChats(chats);
 
-  thinking=false;
+  stopThinking();
   document.getElementById("sendBtn").disabled=false;
   document.getElementById("sendBtn").style.background="linear-gradient(135deg,#6366f1,#8b5cf6)";
   scrollToBottom();
@@ -5044,7 +5081,7 @@ async function send(){
   appendUserBubble(text,filesToSend);
 
   inp.value=""; inp.style.height="auto";
-  thinking=true;
+  startThinking();
   document.getElementById("sendBtn").disabled=true;
   document.getElementById("sendBtn").style.background="#374151";
 
@@ -5109,7 +5146,7 @@ async function send(){
   saveChats(chats);
   clearFiles();
 
-  thinking=false;
+  stopThinking();
   document.getElementById("sendBtn").disabled=false;
   document.getElementById("sendBtn").style.background="linear-gradient(135deg,#6366f1,#8b5cf6)";
   scrollToBottom();
