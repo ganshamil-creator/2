@@ -3805,6 +3805,47 @@ function handleFiles(input){
             showToast("⚠️ JSZip не загружен — PPTX не прочитан");
           }
         }catch(pptxErr){ showToast("⚠️ Ошибка чтения PPTX: "+pptxErr.message); }
+      } else if(f.type.startsWith("audio/")||/\.(mp3|wav|m4a|ogg|webm|aac|flac|opus)$/i.test(f.name)){
+        // Claude, Gemini-в-этом-хабе, Perplexity, DeepSeek, Kimi и GPT не принимают аудио напрямую
+        // через текущие вызовы — распознаём речь отдельно через Whisper (OpenAI), используя тот же
+        // ключ, что уже настроен для GPT-5.4. Результат — обычный текст, который дальше идёт
+        // в контекст сообщения точно так же, как текст из PDF/DOCX/PPTX.
+        showToast("🎙️ Распознаю аудио: "+f.name);
+        try{
+          const gptKey = (typeof getKeys==="function" ? getKeys().gpt : null);
+          if(!gptKey){
+            showToast("⚠️ Для распознавания аудио нужен ключ OpenAI в ⚙️ Настройки");
+          } else {
+            const audioBlob = new Blob([Uint8Array.from(atob(b64),c=>c.charCodeAt(0))], {type:f.type||"audio/mpeg"});
+            const form = new FormData();
+            form.append("file", audioBlob, f.name);
+            form.append("model", "whisper-1");
+            let whisperResp;
+            try{
+              whisperResp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+                method:"POST",
+                headers:{"Authorization":"Bearer "+gptKey},
+                body: form
+              });
+            }catch(networkErr){
+              // Тот же сценарий блокировки сети, что и с остальными прямыми запросами —
+              // но Whisper принимает только multipart/form-data, наш общий прокси этого не умеет,
+              // поэтому тут просто честно сообщаем об ошибке сети вместо отката.
+              throw new Error("Сеть недоступна напрямую (возможен блок без VPN) — распознавание аудио прокси пока не поддерживает multipart-запросы");
+            }
+            if(!whisperResp.ok){
+              const errJson = await whisperResp.json().catch(()=>({}));
+              throw new Error(errJson.error?.message || whisperResp.statusText);
+            }
+            const whisperData = await whisperResp.json();
+            if(whisperData.text && whisperData.text.trim()){
+              obj.text = "[Расшифровка аудио \""+f.name+"\"]\n"+whisperData.text.trim();
+              showToast("✅ Аудио распознано ("+whisperData.text.trim().length+" симв.)");
+            } else {
+              showToast("⚠️ Не удалось распознать речь в аудио");
+            }
+          }
+        }catch(audioErr){ showToast("⚠️ Ошибка распознавания аудио: "+audioErr.message); }
       } else if(f.name.endsWith(".xlsx")||f.name.endsWith(".xls")||
                 f.type==="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"||
                 f.type==="application/vnd.ms-excel"){
