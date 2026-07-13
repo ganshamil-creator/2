@@ -587,6 +587,7 @@
 <div id="quickBar" style="display:none;padding:8px 12px;background:#fefce8;border-top:1px solid #fde047;flex-shrink:0;align-items:center;gap:8px;flex-wrap:wrap">
   <span style="font-size:13px;font-weight:600;color:#92400e">⚡ Быстрый режим:</span>
   <select id="quickAgent" style="padding:5px 10px;background:#fff;border:1px solid #fde047;border-radius:7px;color:#1e293b;font-size:13px"></select>
+  <select id="quickRole" style="padding:5px 10px;background:#fff;border:1px solid #fde047;border-radius:7px;color:#1e293b;font-size:13px"></select>
   <span style="font-size:12px;color:#78350f">Отвечает только 1 AI — быстро и без синтеза</span>
   <button onclick="toggleQuickMode()" style="margin-left:auto;background:none;border:none;color:#92400e;font-size:16px;cursor:pointer">✕</button>
 </div>
@@ -895,6 +896,41 @@ const FABLE_AGENT = {
   id:"fable", name:"Claude Fable 5", emoji:"✨", color:"#7c3aed", badge:"Fable 5 · тяжёлый",
   system:"Ты Claude Fable 5 от Anthropic — топовая модель уровня Mythos для долгих, сложных и многошаговых задач: глубокий анализ, код, стратегия, объёмные документы. Давай максимально тщательные, выверенные ответы, разворачивай рассуждение настолько, насколько того требует сложность задачи. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения."+FILE_EXPORT_NOTE
 };
+
+// ════════════════════════════════════════════════════════════════
+// РОЛИ ДЛЯ QUICK MODE — специализированные "личности", которые добавляются
+// ПОВЕРХ системного промпта выбранного агента (не заменяют его). Идея — по мотивам
+// agency-agents: узкая экспертиза + обязательный формат результата, а не общий тон.
+// ════════════════════════════════════════════════════════════════
+const ROLE_PRESETS = {
+  none: { label:"Обычный", prompt:"" },
+  reviewer: {
+    label:"🔍 Ревьюер кода",
+    prompt:"\n\nРОЛЬ: дотошный код-ревьюер. Никогда не хвали код без проверки и не говори \"выглядит нормально\" без разбора. По умолчанию: (1) найди минимум 3 потенциальные проблемы — граничные случаи, несоответствие типов, гонки состояний, пропущенные проверки на null/undefined; (2) для каждой проблемы приведи конкретный входной пример, на котором код сломается; (3) если доступно выполнение кода — реально прогони эти примеры, не описывай гипотетически; (4) в конце дай минимальный исправленный фрагмент, а не переписывай всё целиком без необходимости."
+  },
+  pto: {
+    label:"🏗️ Эксперт ПТО/стройка",
+    prompt:"\n\nРОЛЬ: инженер-эксперт производственно-технического отдела (ПТО) в жилищном строительстве. Свободно оперируешь терминологией сметного дела (ГЭСН/ФЕР, локальные и объектные сметы, КС-2/КС-3), контролем качества этапов СМР, взаимодействием с подрядчиками и календарным планированием на несколько параллельных объектов. Где уместно — используй рамки операционной эффективности (OEE и его компоненты: доступность, производительность, качество) и явно указывай, какие данные нужны для точного расчёта, если их не хватает. Избегай общих фраз вроде \"улучшить процессы\" — формулируй конкретные, измеримые шаги."
+  },
+  mba: {
+    label:"🎓 Строгий научный рецензент",
+    prompt:"\n\nРОЛЬ: строгий научный рецензент уровня преподавателя MBA (ВШБ). Оценивай работу так, будто она подана на защиту: (1) явно указывай, где аргумент не подкреплён данными или ссылкой на источник/фреймворк (Mintzberg, Портер и т.п. — называй конкретно, каким именно); (2) отмечай логические разрывы между разделами (если вывод не следует из анализа выше); (3) не соглашайся с тезисом только потому, что он звучит убедительно — ищи контраргумент и проверяй, выдерживает ли тезис его; (4) структура ответа: сильные стороны → конкретные слабые места с указанием точного места → что добавить для защиты на отлично."
+  },
+  skeptic: {
+    label:"🧐 Скептик-проверяющий",
+    prompt:"\n\nРОЛЬ: намеренный скептик-проверяющий. Твоя задача — не подбодрить и не согласиться, а найти то, что могло быть упущено или неверно истолковано. На любой вывод или план сначала спроси себя \"а что если это не так\" и явно проговори это в ответе. Не сглаживай неприятные выводы ради утешительного тона — если данных недостаточно для уверенного вывода, прямо скажи об этом, а не давай осторожно-оптимистичную формулировку по умолчанию."
+  }
+};
+
+function populateQuickRoleSelect(){
+  const sel = document.getElementById("quickRole");
+  if(!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = Object.keys(ROLE_PRESETS).map(function(k){
+    return '<option value="'+k+'">'+ROLE_PRESETS[k].label+'</option>';
+  }).join("");
+  if(prev && ROLE_PRESETS[prev]) sel.value = prev;
+}
 
 // ════════════════════════════════════════════════════════════════
 // API CALLERS
@@ -3805,40 +3841,41 @@ function handleFiles(input){
             showToast("⚠️ JSZip не загружен — PPTX не прочитан");
           }
         }catch(pptxErr){ showToast("⚠️ Ошибка чтения PPTX: "+pptxErr.message); }
-      } else if(f.type.startsWith("audio/")||/\.(mp3|wav|m4a|ogg|webm|aac|flac|opus)$/i.test(f.name)){
-        // Claude, Gemini-в-этом-хабе, Perplexity, DeepSeek, Kimi и GPT не принимают аудио напрямую
-        // через текущие вызовы — распознаём речь отдельно через Whisper (OpenAI), используя тот же
-        // ключ, что уже настроен для GPT-5.4. Результат — обычный текст, который дальше идёт
-        // в контекст сообщения точно так же, как текст из PDF/DOCX/PPTX.
+      } else if(f.type.startsWith("audio/")||/\.(mp3|mp4|mpeg|mpga|m4a|wav|webm)$/i.test(f.name)){
+        // Whisper (OpenAI) официально принимает только: mp3, mp4, mpeg, mpga, m4a, wav, webm.
+        // Форматы вроде .ogg/.opus/.amr/.3gp (частые для голосовых с телефона) им не поддерживаются —
+        // такие файлы просто не попадают в эту ветку и не тратят впустую вызов API.
         showToast("🎙️ Распознаю аудио: "+f.name);
         try{
           const gptKey = (typeof getKeys==="function" ? getKeys().gpt : null);
           if(!gptKey){
             showToast("⚠️ Для распознавания аудио нужен ключ OpenAI в ⚙️ Настройки");
           } else {
-            const audioBlob = new Blob([Uint8Array.from(atob(b64),c=>c.charCodeAt(0))], {type:f.type||"audio/mpeg"});
-            const form = new FormData();
-            form.append("file", audioBlob, f.name);
-            form.append("model", "whisper-1");
-            let whisperResp;
+            let whisperData=null;
             try{
-              whisperResp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-                method:"POST",
-                headers:{"Authorization":"Bearer "+gptKey},
-                body: form
+              // Пробуем напрямую из браузера (быстрее)
+              const audioBlob = new Blob([Uint8Array.from(atob(b64),c=>c.charCodeAt(0))], {type:f.type||"audio/mpeg"});
+              const form = new FormData();
+              form.append("file", audioBlob, f.name);
+              form.append("model", "whisper-1");
+              const whisperResp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+                method:"POST", headers:{"Authorization":"Bearer "+gptKey}, body: form
               });
-            }catch(networkErr){
-              // Тот же сценарий блокировки сети, что и с остальными прямыми запросами —
-              // но Whisper принимает только multipart/form-data, наш общий прокси этого не умеет,
-              // поэтому тут просто честно сообщаем об ошибке сети вместо отката.
-              throw new Error("Сеть недоступна напрямую (возможен блок без VPN) — распознавание аудио прокси пока не поддерживает multipart-запросы");
+              if(!whisperResp.ok){ const e=await whisperResp.json().catch(()=>({})); throw new Error(e.error?.message||whisperResp.statusText); }
+              whisperData = await whisperResp.json();
+            }catch(directErr){
+              // Whisper принимает только multipart/form-data — обычный JSON-прокси (proxyFetch)
+              // так не умеет, поэтому шлём base64 на отдельный путь в той же Cloud Function,
+              // которая сама соберёт multipart-запрос на сервере (см. functions/index.js).
+              const r=await fetch(getProxyUrl(), {
+                method:"POST", headers:{"Content-Type":"application/json"},
+                body: JSON.stringify({audioBase64:b64, filename:f.name, mimeType:f.type||"audio/mpeg", apiKey:gptKey, model:"whisper-1"})
+              });
+              const txt=await r.text();
+              try{ whisperData=JSON.parse(txt); }catch(e){ throw new Error("Прокси вернул не-JSON (обнови functions/index.js — нужна поддержка audioBase64): "+txt.slice(0,200)); }
+              if(whisperData.error) throw new Error(whisperData.error.message||JSON.stringify(whisperData.error));
             }
-            if(!whisperResp.ok){
-              const errJson = await whisperResp.json().catch(()=>({}));
-              throw new Error(errJson.error?.message || whisperResp.statusText);
-            }
-            const whisperData = await whisperResp.json();
-            if(whisperData.text && whisperData.text.trim()){
+            if(whisperData && whisperData.text && whisperData.text.trim()){
               obj.text = "[Расшифровка аудио \""+f.name+"\"]\n"+whisperData.text.trim();
               showToast("✅ Аудио распознано ("+whisperData.text.trim().length+" симв.)");
             } else {
@@ -4452,6 +4489,7 @@ function toggleQuickMode(){
   }
   if(quickMode){
     populateQuickAgentSelect();
+    populateQuickRoleSelect();
     if(chainMode) toggleChainMode();
     showToast("⚡ Быстрый режим — выбери AI и задай вопрос");
   }
@@ -4575,6 +4613,10 @@ async function sendQuick(text, inp){
   document.getElementById("sendBtn").disabled=true;
   document.getElementById("sendBtn").style.background="#374151";
 
+  const roleId = document.getElementById("quickRole")?.value || "none";
+  const rolePrompt = (ROLE_PRESETS[roleId] && ROLE_PRESETS[roleId].prompt) || "";
+  const roleLabel = (roleId!=="none" && ROLE_PRESETS[roleId]) ? ROLE_PRESETS[roleId].label : "";
+
   // Создаём простой контейнер ответа
   const turnId="quick_"+Date.now();
   const el=document.createElement("div"); el.className="fade"; el.id=turnId;
@@ -4583,6 +4625,7 @@ async function sendQuick(text, inp){
     <span style="font-size:14px;font-weight:700;color:${agent.color}">${agent.name}</span>
     <span style="font-size:11px;background:#f1f5f9;padding:1px 6px;border-radius:4px;color:#64748b">${agent.badge}</span>
     <span style="font-size:11px;color:#f59e0b;margin-left:4px">⚡ быстрый</span>
+    ${roleLabel?`<span style="font-size:11px;background:#ede9fe;color:#6d28d9;padding:1px 8px;border-radius:4px;font-weight:600">${roleLabel}</span>`:""}
   </div>
   <div style="background:#ffffff;border:1px solid ${agent.color}33;border-radius:10px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
     <div id="${turnId}_text" style="font-size:16px;line-height:1.9;color:#1e293b" class="pulse">Отвечает ${agent.name}...</div>
@@ -4598,7 +4641,7 @@ async function sendQuick(text, inp){
   scrollToBottom();
 
   try{
-    const ans=await callAgent(agent, today+agent.system, agentHistory, (partial)=>{
+    const ans=await callAgent(agent, today+agent.system+rolePrompt, agentHistory, (partial)=>{
       const tx=document.getElementById(turnId+"_text");
       if(tx){tx.className="";tx.innerHTML=renderMd(partial);scrollToBottom();}
     });
