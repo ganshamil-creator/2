@@ -193,6 +193,7 @@
             getDocs(collection(db, "users", userId, "chats")),
             this.getDeletedIds()
           ]);
+          this._cachedDeletedIds = deletedIds; // переиспользуется в initCloudData, чтобы не ходить в Firestore второй раз за тем же
           if(snapshot.empty) return [];
           const deleted = new Set(deletedIds);
           const chats = [];
@@ -284,7 +285,17 @@
     // ── Загрузка облачных данных после авторизации ─────────────
     async function initCloudData(){
       showToast("☁️ Загружаю твои данные...");
-      const settings = await window.cloudSync.loadSettings();
+      // Раньше все 4 похода в Firestore (настройки, чаты, health-данные, память) шли
+      // ПОСЛЕДОВАТЕЛЬНО один за другим — каждый ждал завершения предыдущего, хотя они
+      // друг от друга не зависят. На медленной/дальней сети (например, Google Cloud
+      // us-central1 из России) это давало ~10-20с суммарно. Запускаем их параллельно —
+      // общее время ограничено самым медленным запросом, а не суммой всех четырёх.
+      const [settings, cloudChats, wrData, savedMemory] = await Promise.all([
+        window.cloudSync.loadSettings(),
+        window.cloudSync.loadChats(),
+        window.cloudSync.loadWearable(),
+        window.cloudSync.loadMemory()
+      ]);
       if(settings){
         if(settings.keys && Object.keys(settings.keys).length>0){
           localStorage.setItem("ai_hub_keys_v2", JSON.stringify(settings.keys));
@@ -293,7 +304,6 @@
           localStorage.setItem("active_agents", JSON.stringify(settings.agentIds));
         }
       }
-      const cloudChats = await window.cloudSync.loadChats();
       if(cloudChats !== null){
         // Защита от гонки: если пользователь успел создать тему / отправить сообщение
         // ДО того, как эта загрузка завершилась (например, сразу после деплоя, пока страница
@@ -305,7 +315,9 @@
         try{
           const localNow = JSON.parse(localStorage.getItem(getChatKey())||"[]");
           const cloudIds = new Set(cloudChats.map(c=>c.id));
-          const deletedIds = new Set(await window.cloudSync.getDeletedIds());
+          // Переиспользуем deletedIds, который loadChats() уже забрал из Firestore секунду
+          // назад — раньше здесь был ещё один отдельный поход в базу за тем же самым.
+          const deletedIds = new Set(window.cloudSync._cachedDeletedIds || await window.cloudSync.getDeletedIds());
           const localOnly = localNow.filter(c=>
             !cloudIds.has(c.id) && !deletedIds.has(c.id) && c.messages && c.messages.length>0
           );
@@ -336,13 +348,11 @@
       // этого данные, сохранённые на одном устройстве, не появлялись на другом,
       // пока не истечёт localStorage или не переключится профиль вручную.
       try{
-        const wrData = await window.cloudSync.loadWearable();
         if(typeof loadAllProfiles === "function"){
           loadAllProfiles(wrData, wrData);
         }
       }catch(healthLoadErr){ console.warn("Health data load error:", healthLoadErr); }
       // Загружаем сквозную память — безопасное слияние, не теряем локальные данные
-      const savedMemory = await window.cloudSync.loadMemory();
       if(savedMemory) {
         window.userMemory = window.userMemory || {};
         if(typeof mergeUserMemory === "function"){
@@ -366,6 +376,14 @@
     // Автосинхронизация каждые 60 секунд — только сохраняем текущие темы (не воскрешаем удалённые)
     setInterval(async()=>{
       if(!window.cloudSync?.userId) return;
+      // Не запускаем тяжёлую сериализацию (JSON.stringify всей истории чата — при длинных
+      // переписках это реально заметная нагрузка на основной поток) ровно в тот момент,
+      // когда человек активно печатает/правит текст в строке ввода — раньше это могло давать
+      // подвисание на несколько секунд именно во время редактирования вопроса. Просто
+      // пропускаем этот тик — следующий через 60с сохранит как обычно.
+      const activeInput = document.getElementById("queryInput");
+      const isTyping = activeInput && document.activeElement===activeInput && activeInput.value && activeInput.value.length>0;
+      if(isTyping) return;
       const chats = JSON.parse(localStorage.getItem("ai_hub_chats_v4")||"[]");
       // Только сохраняем — не мержим с облаком, чтобы не воскрешать удалённые темы.
       // Пустые темы (без сообщений) не отправляем — иначе они копятся в облаке навсегда.
