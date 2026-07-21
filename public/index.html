@@ -3460,22 +3460,30 @@ async function callPerplexity(key, system, history){
         fixedHistory.push(m);
       }
     });
-    // ВАЖНО: у нового Agent API другой формат мультимодального контента (input_text/input_image),
-    // отличный от старого chat/completions (text/image_url). Точного подтверждённого формата для
-    // картинок в документации на момент написания не нашлось — чтобы не гадать и не сломать
-    // молча, картинки здесь пока не отправляем как изображение, оставляем текстовую пометку.
-    // Для задач с фото используй Claude/Gemini/GPT/Kimi — у них vision работает как обычно.
+    // Подтверждённый формат из официального cookbook Perplexity (image-analysis example):
+    // {"type":"input_text","text":"..."} и {"type":"input_image","image_url":"data:...;base64,..."}
+    // (плоская строка, не вложенный объект как в старом chat/completions). Пресеты не гарантируют
+    // vision — для картинок явно переключаемся на подтверждённую в примере модель openai/gpt-5.4
+    // и вручную добавляем web_search, раз пресет тут не используется.
+    const hasImages = fixedHistory.some(m=>Array.isArray(m.content)&&m.content.some(c=>c.type==="image_url"));
     const inputMessages = fixedHistory.map(function(m){
       if(Array.isArray(m.content)){
-        const textParts = m.content.filter(c=>c.type==="text").map(c=>c.text);
-        const hadImage = m.content.some(c=>c.type==="image_url");
-        let text = textParts.join("\n");
-        if(hadImage) text += "\n[изображение приложено, но Perplexity Agent API пока не поддерживается в этом хабе для vision]";
-        return {role:m.role, content:text};
+        const parts=[];
+        m.content.forEach(function(c){
+          if(c.type==="text") parts.push({type:"input_text", text:c.text});
+          else if(c.type==="image_url"){
+            const url=(c.image_url&&c.image_url.url)||c.image_url;
+            parts.push({type:"input_image", image_url:url});
+          }
+        });
+        return {role:m.role, content:parts};
       }
       return {role:m.role, content:m.content};
     });
-    const pBody=JSON.stringify({preset:"fast", instructions:system, input:inputMessages});
+    const bodyObj = hasImages
+      ? {model:"openai/gpt-5.4", instructions:system, input:inputMessages, tools:[{type:"web_search"}]}
+      : {preset:"fast", instructions:system, input:inputMessages};
+    const pBody=JSON.stringify(bodyObj);
     // Perplexity API не отдаёт CORS-заголовки для браузерных запросов —
     // всегда идём через серверный прокси, независимо от устройства
     const d=await proxyFetch("https://api.perplexity.ai/v1/agent",{"Authorization":"Bearer "+key},pBody);
