@@ -898,7 +898,7 @@ const ALL_AGENTS = [
    system:"Ты Claude от Anthropic. Давай аналитические глубокие ответы. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения. Помни историю разговора. Если в сообщении пользователя есть блок АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ИНТЕРНЕТА — используй их как главный источник фактов, они получены из веб-поиска прямо сейчас."+FILE_EXPORT_NOTE},
   {id:"gemini",    name:"Gemini",     emoji:"🔴", color:"#ea4335", badge:"2.5 Flash",
    system:"Ты Google Gemini. Анализируй глубоко. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём и процитируй его в ответе. Умеешь точно переводить между любыми языками. Используй дату из контекста. Если есть данные поиска — используй их."+FILE_EXPORT_NOTE},
-  {id:"perplexity",name:"Perplexity", emoji:"🟣", color:"#8b5cf6", badge:"Sonar Pro",
+  {id:"perplexity",name:"Perplexity", emoji:"🟣", color:"#8b5cf6", badge:"Agent API",
    system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."+FILE_EXPORT_NOTE},
   {id:"deepseek",  name:"DeepSeek",   emoji:"⚡", color:"#06b6d4", badge:"V4",
    system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста."+FILE_EXPORT_NOTE},
@@ -3430,10 +3430,25 @@ async function callGemini(key, system, history){
   throw lastErr||new Error("Gemini недоступен");
 }
 
+// Вытаскивает текст финального ответа из output-массива Agent API — там вперемешку
+// могут идти блоки search_results/fetch_url_results и итоговое сообщение ассистента;
+// нас интересует только последнее.
+function extractPerplexityAgentText(data){
+  if(!data || !Array.isArray(data.output)) return "";
+  let out = "";
+  for(const item of data.output){
+    if(item.type === "message" && Array.isArray(item.content)){
+      for(const c of item.content){
+        if(c.type === "output_text" && c.text) out += c.text;
+      }
+    }
+  }
+  return out.trim();
+}
+
 async function callPerplexity(key, system, history){
   return callWithRetry(async()=>{
-    // Perplexity поддерживает vision через image_url
-    // Фиксим чередование ролей для Perplexity (требует user->assistant->user...)
+    // Фиксим чередование ролей (та же защита, что была раньше — не помешает и на новом API)
     var fixedHistory = [];
     history.forEach(function(m){
       if(fixedHistory.length > 0 && fixedHistory[fixedHistory.length-1].role === m.role && m.role === "user"){
@@ -3445,21 +3460,29 @@ async function callPerplexity(key, system, history){
         fixedHistory.push(m);
       }
     });
-    const msgs=fixedHistory.map(m=>{
+    // ВАЖНО: у нового Agent API другой формат мультимодального контента (input_text/input_image),
+    // отличный от старого chat/completions (text/image_url). Точного подтверждённого формата для
+    // картинок в документации на момент написания не нашлось — чтобы не гадать и не сломать
+    // молча, картинки здесь пока не отправляем как изображение, оставляем текстовую пометку.
+    // Для задач с фото используй Claude/Gemini/GPT/Kimi — у них vision работает как обычно.
+    const inputMessages = fixedHistory.map(function(m){
       if(Array.isArray(m.content)){
-        // Оставляем только текст и image_url (не base64 documents)
-        const filtered=m.content.filter(c=>c.type==="text"||c.type==="image_url");
-        if(filtered.length===1&&filtered[0].type==="text") return {role:m.role,content:filtered[0].text};
-        return {role:m.role,content:filtered};
+        const textParts = m.content.filter(c=>c.type==="text").map(c=>c.text);
+        const hadImage = m.content.some(c=>c.type==="image_url");
+        let text = textParts.join("\n");
+        if(hadImage) text += "\n[изображение приложено, но Perplexity Agent API пока не поддерживается в этом хабе для vision]";
+        return {role:m.role, content:text};
       }
-      return m;
+      return {role:m.role, content:m.content};
     });
-    const pBody=JSON.stringify({model:"sonar-pro",max_tokens:calcTokens(msgs),messages:[{role:"system",content:system},...msgs]});
+    const pBody=JSON.stringify({preset:"fast", instructions:system, input:inputMessages});
     // Perplexity API не отдаёт CORS-заголовки для браузерных запросов —
     // всегда идём через серверный прокси, независимо от устройства
-    const d=await proxyFetch("https://api.perplexity.ai/chat/completions",{"Authorization":"Bearer "+key},pBody);
+    const d=await proxyFetch("https://api.perplexity.ai/v1/agent",{"Authorization":"Bearer "+key},pBody);
     if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
-    return d.choices[0].message.content.trim();
+    const text = extractPerplexityAgentText(d);
+    if(!text) throw new Error("Perplexity Agent API вернул пустой ответ");
+    return text;
   });
 }
 
