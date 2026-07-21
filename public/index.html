@@ -894,24 +894,24 @@ function getToday(){
 // ════════════════════════════════════════════════════════════════
 const FILE_EXPORT_NOTE = " В приложении есть кнопки экспорта: если оформишь ответ как Markdown-таблицу (| Колонка | ... |), пользователь кнопкой «📊 Excel» получит настоящий файл .xlsx; обычный форматированный текст с заголовками (# ## ###) кнопкой «📝 Word» станет файлом .docx. Поэтому НИКОГДА не пиши, что не можешь создать Excel/Word файл — просто сразу давай готовую таблицу/текст в нужном формате. Экспорта в .pptx пока нет — для презентаций давай текстовое содержание по слайдам, которое пользователь сам вставит в PowerPoint.";
 const ALL_AGENTS = [
-  {id:"claude",    name:"Claude",     emoji:"🟠", color:"#d97706", badge:"Sonnet 5",
+  {id:"claude",    name:"Claude",     emoji:"🟠", color:"#d97706", badge:"Sonnet 5", tag:"Глубокий анализ",
    system:"Ты Claude от Anthropic. Давай аналитические глубокие ответы. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения. Помни историю разговора. Если в сообщении пользователя есть блок АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ИНТЕРНЕТА — используй их как главный источник фактов, они получены из веб-поиска прямо сейчас."+FILE_EXPORT_NOTE},
-  {id:"gemini",    name:"Gemini",     emoji:"🔴", color:"#ea4335", badge:"2.5 Flash",
+  {id:"gemini",    name:"Gemini",     emoji:"🔴", color:"#ea4335", badge:"2.5 Flash", tag:"Быстрые ответы",
    system:"Ты Google Gemini. Анализируй глубоко. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём и процитируй его в ответе. Умеешь точно переводить между любыми языками. Используй дату из контекста. Если есть данные поиска — используй их."+FILE_EXPORT_NOTE},
-  {id:"perplexity",name:"Perplexity", emoji:"🟣", color:"#8b5cf6", badge:"Agent API",
+  {id:"perplexity",name:"Perplexity", emoji:"🟣", color:"#8b5cf6", badge:"Agent API", tag:"Веб-поиск",
    system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."+FILE_EXPORT_NOTE},
-  {id:"deepseek",  name:"DeepSeek",   emoji:"⚡", color:"#06b6d4", badge:"V4",
+  {id:"deepseek",  name:"DeepSeek",   emoji:"⚡", color:"#06b6d4", badge:"V4", tag:"Дешёвый код",
    system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста."+FILE_EXPORT_NOTE},
-  {id:"kimi",      name:"Kimi",       emoji:"🔵", color:"#3b82f6", badge:"K2.6",
-   system:"Ты Kimi от Moonshot AI. Специализируешься на креативных задачах, финансовых расчётах и анализе длинных документов. Давай нестандартные практичные решения. Если есть контекст от предыдущих агентов — используй его и дополни своим уникальным взглядом. Используй дату из контекста."+FILE_EXPORT_NOTE},
-  {id:"gpt",       name:"GPT-5.4",     emoji:"🟢", color:"#10a779", badge:"5.4 mini",
+  {id:"kimi",      name:"Kimi",       emoji:"🔵", color:"#3b82f6", badge:"K3", tag:"Длинные документы",
+   system:"Ты Kimi K3 от Moonshot AI. Специализируешься на креативных задачах, финансовых расчётах и анализе длинных документов. Давай нестандартные практичные решения. Если есть контекст от предыдущих агентов — используй его и дополни своим уникальным взглядом. Используй дату из контекста. Отвечай именно на то, что спросили — не бери на себя лишнюю инициативу и не делай сверх запрошенного без явной просьбы."+FILE_EXPORT_NOTE},
+  {id:"gpt",       name:"GPT-5.4",     emoji:"🟢", color:"#10a779", badge:"5.4 mini", tag:"Практичные советы",
    system:"Ты GPT-5.4 от OpenAI. Давай практичные пошаговые решения и конкретные рекомендации. Специализируешься на прикладных задачах, инструкциях и советах. Если есть контекст от предыдущих агентов — обогати его практическими советами. Используй дату из контекста."+FILE_EXPORT_NOTE},
 ];
 
 // Claude Fable 5 — премиальная Mythos-модель. НЕ входит в ALL_AGENTS (чтобы не участвовать
 // в параллельном/цепочном режимах по умолчанию — дорого), доступна только через Quick Mode.
 const FABLE_AGENT = {
-  id:"fable", name:"Claude Fable 5", emoji:"✨", color:"#7c3aed", badge:"Fable 5 · тяжёлый",
+  id:"fable", name:"Claude Fable 5", emoji:"✨", color:"#7c3aed", badge:"Fable 5 · тяжёлый", tag:"Сложные задачи",
   system:"Ты Claude Fable 5 от Anthropic — топовая модель уровня Mythos для долгих, сложных и многошаговых задач: глубокий анализ, код, стратегия, объёмные документы. Давай максимально тщательные, выверенные ответы, разворачивай рассуждение настолько, насколько того требует сложность задачи. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения."+FILE_EXPORT_NOTE
 };
 
@@ -3335,13 +3335,18 @@ async function callKimi(key, system, history){
     // там гарантированно не подходит — то есть при каждом сообщении с Kimi хаб сначала дважды
     // гарантированно ловил Invalid Authentication, и только потом (если вообще доходило) шёл на
     // рабочий адрес. Это и есть причина "часто не работает". Теперь бьём сразу в надёжный адрес.
-    const primary={url:"https://api.moonshot.ai/v1/chat/completions", model:"kimi-k2.6"};
+    // Kimi K3 (вышла 16.07.2026) — замена K2.6, крупный апгрейд (2.8Т параметров, нативное
+    // зрение, окно 1М токенов). Дороже прежней K2.6, поэтому reasoning_effort зафиксирован на
+    // "high" (баланс скорости/цены/качества по рекомендации самой Moonshot), а не "max" —
+    // на max независимые тесты отмечают неоправданно большой расход токенов на рассуждения
+    // даже для простых вопросов.
+    const primary={url:"https://api.moonshot.ai/v1/chat/completions", model:"kimi-k3"};
     const mirrors=[
-      {url:"https://api.kimi.ai/v1/chat/completions",     model:"kimi-k2.6"},
-      {url:"https://api.moonshot.cn/v1/chat/completions", model:"kimi-k2.6"}
+      {url:"https://api.kimi.ai/v1/chat/completions",     model:"kimi-k3"},
+      {url:"https://api.moonshot.cn/v1/chat/completions", model:"kimi-k3"}
     ];
     async function tryEndpoint(url, model){
-      const kimiBody=JSON.stringify({model,max_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
+      const kimiBody=JSON.stringify({model,reasoning_effort:"high",max_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
       const resp=await proxyFetch(url,{"Authorization":"Bearer "+cleanKey},kimiBody);
       if(resp && resp.error) throw new Error(resp.error.message||JSON.stringify(resp.error));
       return resp;
@@ -4562,7 +4567,7 @@ function populateQuickAgentSelect(){
   if(!sel) return;
   const prev = sel.value;
   const agents = getAgents().length ? getAgents() : ALL_AGENTS;
-  let html = agents.map(a=>`<option value="${a.id}">${a.emoji} ${a.name}</option>`).join("");
+  let html = agents.map(a=>`<option value="${a.id}">${a.emoji} ${a.name}${a.tag?" ("+a.tag+")":""}</option>`).join("");
   if(getKeys().claude) html += `<option value="fable">${FABLE_AGENT.emoji} ${FABLE_AGENT.name} (дороже, для сложных задач)</option>`;
   sel.innerHTML = html;
   if(prev && [...sel.options].some(o=>o.value===prev)) sel.value = prev;
@@ -4689,6 +4694,7 @@ async function sendQuick(text, inp){
     <span style="font-size:18px">${agent.emoji}</span>
     <span style="font-size:14px;font-weight:700;color:${agent.color}">${agent.name}</span>
     <span style="font-size:11px;background:#f1f5f9;padding:1px 6px;border-radius:4px;color:#64748b">${agent.badge}</span>
+    ${agent.tag?`<span style="font-size:11px;background:#ecfdf5;padding:1px 6px;border-radius:4px;color:#047857">${agent.tag}</span>`:""}
     <span style="font-size:11px;color:#f59e0b;margin-left:4px">⚡ быстрый</span>
     ${roleLabel?`<span style="font-size:11px;background:#ede9fe;color:#6d28d9;padding:1px 8px;border-radius:4px;font-weight:600">${roleLabel}</span>`:""}
   </div>
@@ -5391,6 +5397,7 @@ function appendTurnContainer(turnId, agents, cols){
     h+=`<span style="font-size:14px">${a.emoji}</span>`;
     h+=`<span style="font-size:14px;font-weight:700;color:#334155">${a.name}</span>`;
     h+=`<span style="font-size:9px;background:#f1f5f9;padding:1px 5px;border-radius:3px;color:#64748b">${a.badge}</span>`;
+    h+=`${a.tag?`<span style="font-size:9px;background:#ecfdf5;padding:1px 5px;border-radius:3px;color:#047857">${a.tag}</span>`:""}`;
     h+=`<span id="${cid}_status" style="margin-left:auto;font-size:11px" class="pulse">•••</span>`;
     h+=`<span id="${cid}_arr" style="font-size:9px;color:#4b5563;margin-left:2px">▼</span>`;
     h+=`</div>`;
@@ -5454,7 +5461,7 @@ function openAgentFull(turnId, agentId){
   const tx=document.getElementById(turnId+"_"+agentId+"_text");
   if(!agent||!tx) return;
   document.getElementById("agentFullEmoji").textContent=agent.emoji;
-  document.getElementById("agentFullName").textContent=agent.name+" · "+agent.badge;
+  document.getElementById("agentFullName").textContent=agent.name+" · "+agent.badge+(agent.tag?" · "+agent.tag:"");
   document.getElementById("agentFullContent").innerHTML=tx.innerHTML;
   // Navigation buttons
   const nav=document.getElementById("agentFullNav");
@@ -5637,6 +5644,7 @@ function renderMessages(){
         h+=`<div onclick="toggleAgentCard('${cid}')" style="display:flex;align-items:center;gap:6px;padding:9px 10px;cursor:pointer">`;
         h+=`<span>${a.emoji}</span><span style="font-size:11px;font-weight:700;color:${r.status==="ok"?a.color:"#6b7280"}">${a.name}</span>`;
         h+=`<span style="font-size:9px;background:#f1f5f9;padding:1px 5px;border-radius:3px;color:#64748b">${a.badge}</span>`;
+        h+=`${a.tag?`<span style="font-size:9px;background:#ecfdf5;padding:1px 5px;border-radius:3px;color:#047857">${a.tag}</span>`:""}`;
         h+=`<span style="margin-left:auto;font-size:11px;color:${r.status==="ok"?"#4ade80":"#f87171"}">${r.status==="ok"?"✓":"✗"}</span>`;
         h+=`<span id="${cid}_arr" style="font-size:9px;color:#4b5563;margin-left:2px">▼</span></div>`;
         h+=`<div id="${cid}_body" style="display:none;border-top:1px solid #f1f5f9;padding:10px">`;
@@ -6751,7 +6759,7 @@ function renderAgentToggles(){
       else activeAgentIds.push(a.id);
       renderAgentToggles();
     };
-    div.innerHTML=`<span style="font-size:14px">${a.emoji}</span><div style="flex:1"><div style="font-size:12px;font-weight:600;color:${a.color}">${a.name}</div><div style="font-size:10px;color:#6b7280">${a.badge}</div></div><div style="width:20px;height:20px;border-radius:4px;background:${on?"#6366f1":"#1e1e2e"};border:1px solid ${on?"#6366f1":"#374151"};display:flex;align-items:center;justify-content:center;font-size:13px">${on?"✓":""}</div>`;
+    div.innerHTML=`<span style="font-size:14px">${a.emoji}</span><div style="flex:1"><div style="font-size:12px;font-weight:600;color:${a.color}">${a.name}</div><div style="font-size:10px;color:#6b7280">${a.badge}${a.tag?" · "+a.tag:""}</div></div><div style="width:20px;height:20px;border-radius:4px;background:${on?"#6366f1":"#1e1e2e"};border:1px solid ${on?"#6366f1":"#374151"};display:flex;align-items:center;justify-content:center;font-size:13px">${on?"✓":""}</div>`;
     el.appendChild(div);
   });
 }
