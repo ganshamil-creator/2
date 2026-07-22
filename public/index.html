@@ -3405,7 +3405,17 @@ async function callGemini(key, system, history){
           return {role,parts:[{text:String(m.content||"")}]};
         });
         const geminiApi = "v1beta";
-        const gPayload = {system_instruction:{parts:[{text:system}]},contents,generationConfig:{maxOutputTokens:calcTokens(history)}};
+        // ВАЖНО: у Gemini 2.5+/3.x "размышления" (thinking) по умолчанию считаются в тот же
+        // бюджет maxOutputTokens — из-за этого ответы стали обрезаться почти до нуля после
+        // перехода на 3.6 Flash (у 2.5 Flash thinking не был включён по умолчанию, поэтому
+        // раньше этой проблемы не было). У серии Gemini 3.x thinking нельзя отключить
+        // полностью (только понизить через thinkingLevel), у серии 2.5.x — можно через
+        // thinkingBudget:0. Плюс поднимаем минимальный бюджет токенов, чтобы гарантированно
+        // хватило и на размышления, и на сам видимый ответ.
+        const thinkingConfig = modelName.startsWith("gemini-3")
+          ? {thinkingLevel:"low"}
+          : {thinkingBudget:0};
+        const gPayload = {system_instruction:{parts:[{text:system}]},contents,generationConfig:{maxOutputTokens:Math.max(calcTokens(history),4096),thinkingConfig}};
         const gBody=JSON.stringify(gPayload);
         let d;
         // Gemini всегда через прокси — геоблок работает и на десктопе
