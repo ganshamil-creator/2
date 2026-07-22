@@ -896,7 +896,7 @@ const FILE_EXPORT_NOTE = " В приложении есть кнопки экс�
 const ALL_AGENTS = [
   {id:"claude",    name:"Claude",     emoji:"🟠", color:"#d97706", badge:"Sonnet 5", tag:"Глубокий анализ",
    system:"Ты Claude от Anthropic. Давай аналитические глубокие ответы. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения. Помни историю разговора. Если в сообщении пользователя есть блок АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ИНТЕРНЕТА — используй их как главный источник фактов, они получены из веб-поиска прямо сейчас."+FILE_EXPORT_NOTE},
-  {id:"gemini",    name:"Gemini",     emoji:"🔴", color:"#ea4335", badge:"2.5 Flash", tag:"Быстрые ответы",
+  {id:"gemini",    name:"Gemini",     emoji:"🔴", color:"#ea4335", badge:"3.6 Flash", tag:"Быстрые ответы",
    system:"Ты Google Gemini. Анализируй глубоко. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём и процитируй его в ответе. Умеешь точно переводить между любыми языками. Используй дату из контекста. Если есть данные поиска — используй их."+FILE_EXPORT_NOTE},
   {id:"perplexity",name:"Perplexity", emoji:"🟣", color:"#8b5cf6", badge:"Agent API", tag:"Веб-поиск",
    system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."+FILE_EXPORT_NOTE},
@@ -3376,11 +3376,13 @@ async function callKimi(key, system, history){
 async function callGemini(key, system, history){
   // Таймаут зависит от модели. Старые модели (1.5, 2.0-flash, 2.0-flash-exp) отключены
   // Google в 2026 году — любой запрос к ним вернёт 404, поэтому используем актуальные.
+  // Обновлено 22.07.2026: gemini-3.6-flash вышла 21.07.2026 — токен-эффективнее и дешевле
+  // по выходным токенам ($7.50 vs $9 у 3.5 Flash), с более свежим знанием (март 2026).
   const models=[
-    {name:"gemini-2.5-flash",       timeout:90000},
+    {name:"gemini-3.6-flash",       timeout:90000},
     {name:"gemini-3.5-flash",       timeout:90000},
     {name:"gemini-2.5-pro",         timeout:150000},
-    {name:"gemini-2.5-flash-lite",  timeout:60000},
+    {name:"gemini-3.5-flash-lite",  timeout:60000},
   ];
   let lastErr=null;
   for(let mi=0;mi<models.length;mi++){
