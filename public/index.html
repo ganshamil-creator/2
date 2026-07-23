@@ -736,6 +736,12 @@ function renderMd(text){
     return token;
   });
 
+  // Некоторые модели (особенно Gemini внутри markdown-таблиц) иногда вставляют литеральный
+  // HTML-тег <br> вместо обычного переноса строки. Если не обработать его здесь, следующий шаг
+  // (экранирование < и >) превратит его в текст "&lt;br&gt;", который отобразится как есть —
+  // видимый тег вместо переноса строки. Меняем на настоящий перенос до экранирования.
+  t = t.replace(/<br\s*\/?>/gi, "\n");
+
   t = t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
   // Таблицы — обрабатываем до остального
@@ -6129,7 +6135,8 @@ ${content}
 function getExportContent(turnId){
   const el=document.getElementById(turnId+"_consolidated")||document.getElementById(turnId+"_text");
   const chat=getChat();
-  return {text:el?.dataset?.raw||el?.innerText||"", title:chat?.title||"AI Multi-Hub", date:new Date().toLocaleDateString("ru-RU")};
+  const raw=(el?.dataset?.raw||el?.innerText||"").replace(/<br\s*\/?>/gi, "\n");
+  return {text:raw, title:chat?.title||"AI Multi-Hub", date:new Date().toLocaleDateString("ru-RU")};
 }
 
 function downloadBlob(blob, filename){
