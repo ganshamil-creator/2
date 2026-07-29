@@ -3993,7 +3993,7 @@ function handleFiles(input){
             showToast("⚠️ XLSX библиотека не загружена");
           }
         }catch(xlsxErr){ showToast("⚠️ Ошибка чтения Excel: "+xlsxErr.message); }
-      } else if(f.type.startsWith("text/")||f.name.endsWith(".txt")||f.name.endsWith(".md")||f.name.endsWith(".csv")){
+      } else if(f.type.startsWith("text/")||/\.(txt|md|csv|py|js|jsx|ts|tsx|json|html|htm|css|scss|java|c|cpp|h|hpp|go|rb|php|sql|yaml|yml|sh|bash|xml|log|ini|toml|env|gitignore|dockerfile|rs|kt|swift|r|m)$/i.test(f.name)){
         try{obj.text=atob(b64);}catch(e){}
       }
       currentFiles.push(obj);
@@ -4651,6 +4651,11 @@ async function sendQuick(text, inp){
       // не видел остальной код. 200000 символов (~450-500 КБ) с запасом покрывает такие файлы,
       // оставаясь в пределах контекстного окна модели.
       fileCtx+="\n"+typeLabel+"\n"+f.text.slice(0,200000)+(f.text.length>200000?"\n...[обрезано]":"")+"\n";
+    } else {
+      // Не смогли извлечь текст (неизвестный формат/пустой файл) — явно помечаем, а не молчим.
+      // Иначе при вложении ТОЛЬКО таких файлов без текста в самом сообщении итоговое сообщение
+      // могло получиться полностью пустым, и API отклонял его с ошибкой "non-empty content".
+      fileCtx+="\n[Файл "+f.name+" — не удалось прочитать содержимое (неизвестный формат)]\n";
     }
   }
   if(imageFiles.length>0){
