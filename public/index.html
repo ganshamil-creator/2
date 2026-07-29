@@ -879,9 +879,21 @@ function buildRawHistoryFromChat(chat){
           const fileTexts=u.files.filter(f=>f.text).map(f=>"\n[Файл: "+f.name+"]\n"+f.text.slice(0,6000));
           if(fileTexts.length) content=content+"\n\n=== Ранее приложенные файлы ===\n"+fileTexts.join("\n")+"\n=== Конец файлов ===";
         }
+        // Железная защита: содержимое НИКОГДА не должно быть пустой строкой — иначе Anthropic
+        // и другие API отклоняют весь запрос ошибкой "non-empty content", и это ломает ВСЮ
+        // последующую переписку в чате навсегда (история пересобирается заново при каждом
+        // сообщении, так что один такой случай в прошлом бьёт по каждому будущему запросу).
+        // Раньше это случалось, если сообщение отправили с пустым текстом и файлами, у которых
+        // не извлёкся текст (например из-за нераспознанного расширения) — теперь подставляем
+        // плейсхолдер вместо пустой строки, что бы ни было причиной.
+        if(!content || !content.trim()){
+          content = u.files && u.files.length
+            ? "[вложение без извлечённого текста: "+u.files.map(f=>f.name).join(", ")+"]"
+            : "[пустое сообщение]";
+        }
         rawHistory.push({role:"user",content});
       }
-      if(a) rawHistory.push({role:"assistant",content:a.content});
+      if(a) rawHistory.push({role:"assistant",content:(a.content&&a.content.trim())?a.content:"[нет ответа]"});
     }
   }
   return rawHistory;
