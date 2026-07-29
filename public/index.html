@@ -3255,7 +3255,11 @@ async function callClaude(key, system, history, onChunk, forceModel){
     // ответа, но и сам код, служебные блоки вызова инструмента и вывод выполнения — обычной
     // логики calcTokens() (1500-8000 для чата) на это часто не хватает, ответ обрывался
     // на полуслове. Даём отдельный, заведомо щедрый бюджет именно для этого режима.
-    const maxTok = useCodeExec ? 12000 : calcTokens(history);
+    // Подняли ещё раз 29.07.2026: при код-ревью больших файлов (десятки КБ) Fable иногда
+    // цитирует/переносит содержимое файла целиком внутрь bash-скрипта в песочнице — это само
+    // по себе съедает солидный кусок бюджета вывода, и 12000 токенов стало не хватать, ответ
+    // обрывался на середине файла ещё до того, как модель успевала закончить анализ.
+    const maxTok = useCodeExec ? 24000 : calcTokens(history);
     const bodyObj={model,max_tokens:maxTok,system,messages:history,stream:!isMobile&&!useCodeExec};
     if(useCodeExec) bodyObj.tools=[{type:"code_execution_20250825",name:"code_execution"}];
     const body=JSON.stringify(bodyObj);
@@ -4598,7 +4602,9 @@ function populateQuickAgentSelect(){
   const prev = sel.value;
   const agents = getAgents().length ? getAgents() : ALL_AGENTS;
   let html = agents.map(a=>`<option value="${a.id}">${a.emoji} ${a.name}${a.tag?" ("+a.tag+")":""}</option>`).join("");
-  if(getKeys().claude) html += `<option value="fable">${FABLE_AGENT.emoji} ${FABLE_AGENT.name} (дороже, для сложных задач)</option>`;
+  // Fable 5 убран из выбора 30.07.2026 — $33 за 30 минут работы оказалось неоправданно дорого
+  // для повседневного использования. Код обработки (case "fable") оставлен нетронутым в
+  // callAgent/callByAgentId — он просто больше никогда не вызывается, раз выбрать его негде.
   sel.innerHTML = html;
   if(prev && [...sel.options].some(o=>o.value===prev)) sel.value = prev;
 }
@@ -4627,7 +4633,7 @@ function toggleCodeExec(){
     btn.style.color = codeExecEnabled ? "#60a5fa" : "#475569";
     btn.style.borderColor = codeExecEnabled ? "#1e3a5f" : "#e2e8f0";
   }
-  showToast(codeExecEnabled ? "🖥️ Выполнение кода включено — работает только с Claude/Fable 5" : "🖥️ Выполнение кода выключено");
+  showToast(codeExecEnabled ? "🖥️ Выполнение кода включено — работает только с Claude" : "🖥️ Выполнение кода выключено");
 }
 
 
