@@ -922,8 +922,8 @@ const ALL_AGENTS = [
    system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста."+FILE_EXPORT_NOTE},
   {id:"kimi",      name:"Kimi",       emoji:"🔵", color:"#3b82f6", badge:"K3", tag:"Длинные документы",
    system:"Ты Kimi K3 от Moonshot AI. Специализируешься на креативных задачах, финансовых расчётах и анализе длинных документов. Давай нестандартные практичные решения. Если есть контекст от предыдущих агентов — используй его и дополни своим уникальным взглядом. Используй дату из контекста. Отвечай именно на то, что спросили — не бери на себя лишнюю инициативу и не делай сверх запрошенного без явной просьбы."+FILE_EXPORT_NOTE},
-  {id:"gpt",       name:"GPT-5.4",     emoji:"🟢", color:"#10a779", badge:"5.4 mini", tag:"Практичные советы",
-   system:"Ты GPT-5.4 от OpenAI. Давай практичные пошаговые решения и конкретные рекомендации. Специализируешься на прикладных задачах, инструкциях и советах. Если есть контекст от предыдущих агентов — обогати его практическими советами. Используй дату из контекста."+FILE_EXPORT_NOTE},
+  {id:"gpt",       name:"GPT-5.6",     emoji:"🟢", color:"#10a779", badge:"Luna", tag:"Практичные советы",
+   system:"Ты GPT-5.6 Luna от OpenAI. Давай практичные пошаговые решения и конкретные рекомендации. Специализируешься на прикладных задачах, инструкциях и советах. Если есть контекст от предыдущих агентов — обогати его практическими советами. Используй дату из контекста."+FILE_EXPORT_NOTE},
 ];
 
 // Claude Fable 5 — премиальная Mythos-модель. НЕ входит в ALL_AGENTS (чтобы не участвовать
@@ -3163,7 +3163,11 @@ async function directOrProxyFetch(url, headers, body){
 
 async function callOpenAI(key, system, history){
   return callWithRetry(async()=>{
-    const body=JSON.stringify({model:"gpt-5.4-mini",max_completion_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
+    // Обновлено 30.07.2026: gpt-5.4-mini -> gpt-5.6-luna. Новое поколение (5.6 вместо 5.4),
+    // ощутимо дешевле после последнего снижения цен OpenAI ($0.20/$1.20 за млн токенов), и по
+    // независимым бенчмаркам агентных задач обгоняет даже Claude Fable 5/Opus 4.8, несмотря на
+    // то что это самый дешёвый тир линейки — подходит под тег "Практичные советы" идеально.
+    const body=JSON.stringify({model:"gpt-5.6-luna",max_completion_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
     let d;
     if(isMobile){
       d=await proxyFetch("https://api.openai.com/v1/chat/completions",{"Authorization":"Bearer "+key},body);
