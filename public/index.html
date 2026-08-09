@@ -658,6 +658,7 @@
 <div id="inputArea" style="padding:10px 12px;border-top:1px solid #e2e8f0;flex-shrink:0;background:#ffffff;display:flex;align-items:flex-end;gap:8px">
   <input type="file" id="fileInput" accept="*/*" multiple style="display:none" onchange="handleFiles(this)">
   <button onclick="document.getElementById('fileInput').click()" style="padding:10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:10px;color:#64748b;font-size:18px;flex-shrink:0">📎</button>
+  <button id="micBtn" onclick="toggleVoiceRecording()" title="Голосовой ввод" style="padding:10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:10px;color:#64748b;font-size:18px;flex-shrink:0;transition:background .15s,color .15s">🎙️</button>
   <textarea id="queryInput" placeholder="Введи вопрос... (Enter — отправить, Shift+Enter — перенос)" style="flex:1;padding:10px 14px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:10px;color:#1e293b;font-size:16px;resize:none;max-height:140px;min-height:48px;line-height:1.6;overflow-y:auto" rows="1"
     onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();showModePicker()}"
     oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
@@ -3824,6 +3825,104 @@ async function extractImageTextOCR(b64, mimeType){
   }catch(e){ return null; }
 }
 
+// Общая логика распознавания речи через Whisper (OpenAI). Используется и при
+// загрузке аудиофайла вложением, и при живой записи с микрофона (см. toggleVoiceRecording).
+// blob — Blob с аудио, filename — имя для API, mimeType — MIME-тип блоба.
+async function transcribeWithWhisper(blob, filename, mimeType){
+  const gptKey = (typeof getKeys==="function" ? getKeys().gpt : null);
+  if(!gptKey) throw new Error("Для распознавания речи нужен ключ OpenAI в ⚙️ Настройки");
+  let whisperData=null;
+  try{
+    // Пробуем напрямую из браузера (быстрее)
+    const form = new FormData();
+    form.append("file", blob, filename);
+    form.append("model", "whisper-1");
+    const whisperResp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method:"POST", headers:{"Authorization":"Bearer "+gptKey}, body: form
+    });
+    if(!whisperResp.ok){ const e=await whisperResp.json().catch(()=>({})); throw new Error(e.error?.message||whisperResp.statusText); }
+    whisperData = await whisperResp.json();
+  }catch(directErr){
+    // Whisper принимает только multipart/form-data — обычный JSON-прокси (proxyFetch)
+    // так не умеет, поэтому шлём base64 на отдельный путь в той же Cloud Function,
+    // которая сама соберёт multipart-запрос на сервере (см. functions/index.js).
+    const b64 = await new Promise((res,rej)=>{
+      const rd=new FileReader();
+      rd.onload=()=>res(rd.result.split(",")[1]);
+      rd.onerror=rej;
+      rd.readAsDataURL(blob);
+    });
+    const r=await fetch(getProxyUrl(), {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({audioBase64:b64, filename:filename, mimeType:mimeType||"audio/mpeg", apiKey:gptKey, model:"whisper-1"})
+    });
+    const txt=await r.text();
+    try{ whisperData=JSON.parse(txt); }catch(e){ throw new Error("Прокси вернул не-JSON (обнови functions/index.js — нужна поддержка audioBase64): "+txt.slice(0,200)); }
+    if(whisperData.error) throw new Error(whisperData.error.message||JSON.stringify(whisperData.error));
+  }
+  if(whisperData && whisperData.text && whisperData.text.trim()) return whisperData.text.trim();
+  return "";
+}
+
+// --- Голосовой ввод (запись с микрофона → Whisper → вставка текста в поле ввода) ---
+var __voiceRecorder = null;
+var __voiceChunks = [];
+var __voiceStream = null;
+
+async function toggleVoiceRecording(){
+  const btn = document.getElementById("micBtn");
+  if(__voiceRecorder && __voiceRecorder.state==="recording"){
+    __voiceRecorder.stop(); // остальное доделает onstop
+    return;
+  }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    showToast("⚠️ Браузер не поддерживает запись с микрофона");
+    return;
+  }
+  const gptKey = (typeof getKeys==="function" ? getKeys().gpt : null);
+  if(!gptKey){
+    showToast("⚠️ Для голосового ввода нужен ключ OpenAI в ⚙️ Настройки");
+    return;
+  }
+  try{
+    __voiceStream = await navigator.mediaDevices.getUserMedia({audio:true});
+  }catch(permErr){
+    showToast("⚠️ Нет доступа к микрофону: "+permErr.message);
+    return;
+  }
+  __voiceChunks = [];
+  const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" :
+               (MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4" : "");
+  __voiceRecorder = mime ? new MediaRecorder(__voiceStream,{mimeType:mime}) : new MediaRecorder(__voiceStream);
+  __voiceRecorder.ondataavailable = function(e){ if(e.data && e.data.size>0) __voiceChunks.push(e.data); };
+  __voiceRecorder.onstop = async function(){
+    __voiceStream.getTracks().forEach(function(t){ t.stop(); });
+    btn.textContent="🎙️"; btn.style.background="#f1f5f9"; btn.style.color="#64748b";
+    const blob = new Blob(__voiceChunks, {type: __voiceRecorder.mimeType||"audio/webm"});
+    __voiceChunks=[];
+    if(blob.size < 1000){ showToast("⚠️ Запись слишком короткая"); return; }
+    showToast("🎙️ Распознаю речь...");
+    try{
+      const ext = (blob.type.includes("mp4")) ? "mp4" : "webm";
+      const text = await transcribeWithWhisper(blob, "voice."+ext, blob.type);
+      if(text){
+        const inp = document.getElementById("queryInput");
+        inp.value = (inp.value ? inp.value.trim()+" " : "") + text;
+        inp.dispatchEvent(new Event("input"));
+        inp.focus();
+        showToast("✅ Распознано ("+text.length+" симв.)");
+      } else {
+        showToast("⚠️ Не удалось распознать речь");
+      }
+    }catch(voiceErr){
+      showToast("⚠️ Ошибка распознавания: "+voiceErr.message);
+    }
+  };
+  __voiceRecorder.start();
+  btn.textContent="⏹️"; btn.style.background="#fee2e2"; btn.style.color="#dc2626";
+  showToast("🎙️ Идёт запись... нажми ещё раз, чтобы остановить");
+}
+
 function handleFiles(input){
   const files=Array.from(input.files);
   if(!files.length) return;
@@ -3948,40 +4047,13 @@ function handleFiles(input){
         // такие файлы просто не попадают в эту ветку и не тратят впустую вызов API.
         showToast("🎙️ Распознаю аудио: "+f.name);
         try{
-          const gptKey = (typeof getKeys==="function" ? getKeys().gpt : null);
-          if(!gptKey){
-            showToast("⚠️ Для распознавания аудио нужен ключ OpenAI в ⚙️ Настройки");
+          const audioBlob = new Blob([Uint8Array.from(atob(b64),c=>c.charCodeAt(0))], {type:f.type||"audio/mpeg"});
+          const text = await transcribeWithWhisper(audioBlob, f.name, f.type||"audio/mpeg");
+          if(text){
+            obj.text = "[Расшифровка аудио \""+f.name+"\"]\n"+text;
+            showToast("✅ Аудио распознано ("+text.length+" симв.)");
           } else {
-            let whisperData=null;
-            try{
-              // Пробуем напрямую из браузера (быстрее)
-              const audioBlob = new Blob([Uint8Array.from(atob(b64),c=>c.charCodeAt(0))], {type:f.type||"audio/mpeg"});
-              const form = new FormData();
-              form.append("file", audioBlob, f.name);
-              form.append("model", "whisper-1");
-              const whisperResp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-                method:"POST", headers:{"Authorization":"Bearer "+gptKey}, body: form
-              });
-              if(!whisperResp.ok){ const e=await whisperResp.json().catch(()=>({})); throw new Error(e.error?.message||whisperResp.statusText); }
-              whisperData = await whisperResp.json();
-            }catch(directErr){
-              // Whisper принимает только multipart/form-data — обычный JSON-прокси (proxyFetch)
-              // так не умеет, поэтому шлём base64 на отдельный путь в той же Cloud Function,
-              // которая сама соберёт multipart-запрос на сервере (см. functions/index.js).
-              const r=await fetch(getProxyUrl(), {
-                method:"POST", headers:{"Content-Type":"application/json"},
-                body: JSON.stringify({audioBase64:b64, filename:f.name, mimeType:f.type||"audio/mpeg", apiKey:gptKey, model:"whisper-1"})
-              });
-              const txt=await r.text();
-              try{ whisperData=JSON.parse(txt); }catch(e){ throw new Error("Прокси вернул не-JSON (обнови functions/index.js — нужна поддержка audioBase64): "+txt.slice(0,200)); }
-              if(whisperData.error) throw new Error(whisperData.error.message||JSON.stringify(whisperData.error));
-            }
-            if(whisperData && whisperData.text && whisperData.text.trim()){
-              obj.text = "[Расшифровка аудио \""+f.name+"\"]\n"+whisperData.text.trim();
-              showToast("✅ Аудио распознано ("+whisperData.text.trim().length+" симв.)");
-            } else {
-              showToast("⚠️ Не удалось распознать речь в аудио");
-            }
+            showToast("⚠️ Не удалось распознать речь в аудио");
           }
         }catch(audioErr){ showToast("⚠️ Ошибка распознавания аудио: "+audioErr.message); }
       } else if(f.name.endsWith(".xlsx")||f.name.endsWith(".xls")||
@@ -4617,7 +4689,10 @@ function populateQuickAgentSelect(){
   if(!sel) return;
   const prev = sel.value;
   const agents = getAgents().length ? getAgents() : ALL_AGENTS;
-  let html = agents.map(a=>`<option value="${a.id}">${a.emoji} ${a.name}${a.tag?" ("+a.tag+")":""}</option>`).join("");
+  // В Быстром режиме (1 агент) по умолчанию первым в списке и выбранным должен быть Gemini —
+  // остальной порядок (параллельный/цепочный режимы, ALL_AGENTS) не трогаем.
+  const ordered = [...agents].sort((a,b)=>(a.id==="gemini"?-1:0)-(b.id==="gemini"?-1:0));
+  let html = ordered.map(a=>`<option value="${a.id}">${a.emoji} ${a.name}${a.tag?" ("+a.tag+")":""}</option>`).join("");
   // Fable 5 убран из выбора 30.07.2026 — $33 за 30 минут работы оказалось неоправданно дорого
   // для повседневного использования. Код обработки (case "fable") оставлен нетронутым в
   // callAgent/callByAgentId — он просто больше никогда не вызывается, раз выбрать его негде.
@@ -4662,7 +4737,7 @@ function toggleSearch(){
 
 // ── Quick Send (один агент) ────────────────────────────────────
 async function sendQuick(text, inp){
-  const agentId = document.getElementById("quickAgent")?.value || "claude";
+  const agentId = document.getElementById("quickAgent")?.value || "gemini";
   const agent = agentId==="fable" ? FABLE_AGENT : ALL_AGENTS.find(a=>a.id===agentId);
   if(!agent){ showToast("❌ Агент не найден"); return; }
 
