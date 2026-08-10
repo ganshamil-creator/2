@@ -520,6 +520,16 @@
         <div style="font-size:10px;color:#6b7280;margin-top:4px">platform.openai.com/api-keys → Create</div>
       </div>
 
+      <!-- Gamma -->
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+          <span>✨</span><span style="font-size:11px;font-weight:600;color:#7c3aed">Gamma</span>
+          <span style="font-size:9px;background:#f5f3ff;color:#6d28d9;padding:1px 6px;border-radius:3px;margin-left:auto">Готовые слайды PPTX</span>
+        </div>
+        <input type="password" id="key_gamma" placeholder="sk-gamma-..." style="width:100%;padding:7px 10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;color:#1e293b;font-size:12px"/>
+        <div style="font-size:10px;color:#6b7280;margin-top:4px">gamma.app/settings/billing → API (нужен план Pro и выше)</div>
+      </div>
+
       <!-- Tavily -->
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
@@ -934,14 +944,6 @@ const FABLE_AGENT = {
 // ════════════════════════════════════════════════════════════════
 const ROLE_PRESETS = {
   none: { label:"Обычный", prompt:"" },
-  reviewer: {
-    label:"🔍 Ревьюер кода",
-    prompt:"\n\nРОЛЬ: дотошный код-ревьюер. Никогда не хвали код без проверки и не говори \"выглядит нормально\" без разбора. По умолчанию: (1) найди минимум 3 потенциальные проблемы — граничные случаи, несоответствие типов, гонки состояний, пропущенные проверки на null/undefined; (2) для каждой проблемы приведи конкретный входной пример, на котором код сломается; (3) если доступно выполнение кода — реально прогони эти примеры, не описывай гипотетически; (4) в конце дай минимальный исправленный фрагмент, а не переписывай всё целиком без необходимости."
-  },
-  pto: {
-    label:"🏗️ Эксперт ПТО/стройка",
-    prompt:"\n\nРОЛЬ: инженер-эксперт производственно-технического отдела (ПТО) в жилищном строительстве. Свободно оперируешь терминологией сметного дела (ГЭСН/ФЕР, локальные и объектные сметы, КС-2/КС-3), контролем качества этапов СМР, взаимодействием с подрядчиками и календарным планированием на несколько параллельных объектов. Где уместно — используй рамки операционной эффективности (OEE и его компоненты: доступность, производительность, качество) и явно указывай, какие данные нужны для точного расчёта, если их не хватает. Избегай общих фраз вроде \"улучшить процессы\" — формулируй конкретные, измеримые шаги."
-  },
   mba: {
     label:"🎓 Строгий научный рецензент",
     prompt:"\n\nРОЛЬ: строгий научный рецензент уровня преподавателя MBA (ВШБ). Оценивай работу так, будто она подана на защиту: (1) явно указывай, где аргумент не подкреплён данными или ссылкой на источник/фреймворк (Mintzberg, Портер и т.п. — называй конкретно, каким именно); (2) отмечай логические разрывы между разделами (если вывод не следует из анализа выше); (3) не соглашайся с тезисом только потому, что он звучит убедительно — ищи контраргумент и проверяй, выдерживает ли тезис его; (4) структура ответа: сильные стороны → конкретные слабые места с указанием точного места → что добавить для защиты на отлично."
@@ -3108,16 +3110,16 @@ function getProxyUrl(){
   return "https://us-central1-ai-hub-21af9.cloudfunctions.net/proxy";
 }
 
-async function proxyFetch(url, headers, body){
+async function proxyFetch(url, headers, body, method){
   const proxyUrl = getProxyUrl();
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 150000);
   try {
     const r = await fetch(proxyUrl, {
-      method: "POST",
+      method: "POST", // это метод к САМОЙ Cloud Function — всегда POST, вне зависимости от upstream-метода
       signal: ctrl.signal,
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({url, headers, body})
+      body: JSON.stringify({url, headers, body, method}) // method — это то, каким методом функция обратится к апстриму (GET/POST); по умолчанию POST, если не указан
     });
     clearTimeout(t);
     const text = await r.text();
@@ -5829,13 +5831,104 @@ function renderMessages(){
 // ════════════════════════════════════════════════════════════════
 // PRESENTATIONS
 // ════════════════════════════════════════════════════════════════
-function openGamma(turnId){
-  const el=document.getElementById(turnId+"_consolidated");
+// Показывает/обновляет маленькое модальное окно прогресса генерации Gamma
+function gammaProgressModal(html){
+  let m = document.getElementById("gammaProgressModal");
+  if(!m){
+    m = document.createElement("div");
+    m.id = "gammaProgressModal";
+    m.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px";
+    document.body.appendChild(m);
+  }
+  m.innerHTML = '<div style="background:#fff;border-radius:14px;padding:24px;max-width:380px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)">' + html + '</div>';
+  return m;
+}
+function closeGammaProgressModal(){ const m=document.getElementById("gammaProgressModal"); if(m) m.remove(); }
+
+// Реальная генерация презентации через Gamma API (создание → опрос статуса → готовая ссылка).
+// Раньше эта кнопка просто копировала текст в буфер и открывала gamma.app/create для ручной
+// вставки — с 10.08.2026 делает всё сама, если в настройках указан ключ Gamma (план Pro+).
+async function openGamma(turnId){
+  const el=document.getElementById(turnId+"_consolidated")||document.getElementById(turnId+"_text");
   if(!el) return;
-  navigator.clipboard.writeText(el.dataset.raw||el.textContent).then(()=>{
-    showToast("📋 Текст скопирован → открываю Gamma");
-    setTimeout(()=>window.open("https://gamma.app/create","_blank"),800);
-  });
+  const text = (el.dataset.raw||el.textContent||"").trim();
+  if(!text){ showToast("⚠️ Нет текста для презентации"); return; }
+  const keys = getKeys();
+  const gammaKey = keys.gamma;
+  if(!gammaKey){
+    // Нет ключа — как и раньше, просто копируем текст и открываем Gamma для ручной вставки
+    navigator.clipboard.writeText(text).then(()=>{
+      showToast("📋 Текст скопирован → открываю Gamma (добавь ключ в ⚙️ Настройки для автогенерации)");
+      setTimeout(()=>window.open("https://gamma.app/create","_blank"),800);
+    });
+    return;
+  }
+  const chat = getChat();
+  gammaProgressModal(
+    '<div style="text-align:center">'
+    + '<div style="font-size:32px;margin-bottom:10px" class="pulse">✨</div>'
+    + '<div style="font-weight:700;color:#1e293b;margin-bottom:6px">Gamma генерирует презентацию...</div>'
+    + '<div id="gammaProgressStatus" style="font-size:13px;color:#6b7280">Отправляю запрос...</div>'
+    + '<button onclick="closeGammaProgressModal()" style="margin-top:16px;padding:6px 14px;background:#f1f5f9;border:none;border-radius:8px;color:#475569;font-size:12px;cursor:pointer">Закрыть (генерация продолжится)</button>'
+    + '</div>'
+  );
+  const gammaHeaders = {"X-API-KEY": gammaKey};
+  try{
+    const createResp = await proxyFetch(
+      "https://public-api.gamma.app/v1.0/generations",
+      gammaHeaders,
+      {
+        inputText: text.slice(0, 9000),
+        textMode: "condense", // у нас уже готовый развёрнутый текст ответа — сжимаем его в слайды, а не расширяем с нуля
+        format: "presentation",
+        numCards: 10,
+        exportAs: "pptx",
+        title: (chat && chat.title) ? chat.title.slice(0,120) : "Презентация",
+        textOptions: { language: "ru" }
+      }
+    );
+    if(createResp.error){ throw new Error(createResp.error.message||createResp.error||JSON.stringify(createResp)); }
+    const genId = createResp.generationId;
+    if(!genId) throw new Error("Gamma не вернула generationId: "+JSON.stringify(createResp).slice(0,200));
+
+    const statusEl = document.getElementById("gammaProgressStatus");
+    let attempts = 0;
+    const maxAttempts = 40; // 40 × 5с ≈ 3.3 минуты — с запасом под обычное время генерации
+    while(attempts < maxAttempts){
+      await new Promise(r=>setTimeout(r,5000));
+      attempts++;
+      if(statusEl) statusEl.textContent = "Опрашиваю статус... ("+attempts+"/"+maxAttempts+")";
+      const poll = await proxyFetch(
+        "https://public-api.gamma.app/v1.0/generations/"+genId,
+        gammaHeaders,
+        undefined,
+        "GET"
+      );
+      if(poll.error){ throw new Error(poll.error.message||poll.error||JSON.stringify(poll)); }
+      if(poll.status === "completed"){
+        closeGammaProgressModal();
+        const gm = gammaProgressModal(
+          '<div style="text-align:center">'
+          + '<div style="font-size:32px;margin-bottom:10px">✅</div>'
+          + '<div style="font-weight:700;color:#1e293b;margin-bottom:14px">Презентация готова!</div>'
+          + '<a href="'+poll.gammaUrl+'" target="_blank" style="display:block;padding:10px;background:#7c3aed;color:#fff;border-radius:8px;font-size:13px;text-decoration:none;margin-bottom:8px;font-weight:600">🔗 Открыть в Gamma</a>'
+          + (poll.exportUrl ? '<a href="'+poll.exportUrl+'" target="_blank" style="display:block;padding:10px;background:#f1f5f9;color:#1e293b;border-radius:8px;font-size:13px;text-decoration:none;margin-bottom:8px;font-weight:600">⬇️ Скачать PPTX</a>' : "")
+          + '<button onclick="closeGammaProgressModal()" style="margin-top:6px;padding:6px 14px;background:transparent;border:none;color:#94a3b8;font-size:12px;cursor:pointer">Закрыть</button>'
+          + '</div>'
+        );
+        showToast("✅ Презентация Gamma готова!");
+        return;
+      }
+      if(poll.status === "failed"){
+        throw new Error(poll.error || poll.message || "Генерация не удалась (status: failed)");
+      }
+      // status "pending"/"processing" — продолжаем опрос
+    }
+    throw new Error("Превышено время ожидания генерации ("+maxAttempts*5+"с)");
+  }catch(gammaErr){
+    closeGammaProgressModal();
+    showToast("❌ Ошибка Gamma: "+gammaErr.message);
+  }
 }
 
 function openCanva(turnId){
@@ -6847,6 +6940,7 @@ function showSettings(){
   document.getElementById("key_deepseek").value=keys.deepseek||"";
   document.getElementById("key_kimi").value=keys.kimi||"";
   document.getElementById("key_gpt").value=keys.gpt||"";
+  document.getElementById("key_gamma").value=keys.gamma||"";
   document.getElementById("key_tavily").value=keys.tavily||"";
   renderAgentToggles();
   document.getElementById("settingsModal").style.display="flex";
@@ -6866,6 +6960,7 @@ function saveSettings(){
     tavily:cleanKey(document.getElementById("key_tavily").value),
     kimi:cleanKey(document.getElementById("key_kimi").value),
     gpt:cleanKey(document.getElementById("key_gpt").value),
+    gamma:cleanKey(document.getElementById("key_gamma").value),
   };
   saveKeys(newKeys);
   // Автоматически включаем агентов если введён ключ
