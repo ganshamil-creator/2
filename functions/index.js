@@ -3,10 +3,17 @@
 // Две HTTP Cloud Functions для Хаба 2:
 //
 // 1) proxy — универсальный исходящий прокси (замена api/proxy.js на Vercel).
-//    Принимает POST {url, headers, body}, проверяет url по белому списку
+//    Принимает POST {url, headers, body, method}, проверяет url по белому списку
 //    разрешённых хостов AI-провайдеров, делает fetch и возвращает ответ.
 //    Используется хабом из браузера через относительный путь /api/proxy
 //    (Hosting rewrite направляет его сюда).
+//
+//    method (опционально, по умолчанию "POST") — метод, которым САМА функция
+//    обращается к апстриму. Добавлено 10.08.2026 для поддержки Gamma API:
+//    создание презентации — POST, а опрос статуса — GET без тела. Раньше
+//    метод к апстриму был жёстко зашит как "POST" всегда, из-за чего GET-запросы
+//    (например, поллинг) были невозможны в принципе — сам вызывающий код на
+//    фронтенде мог просить что угодно, но проксировался всегда как POST.
 //
 // 2) samsungWebhook — приём данных от HC Webhook (Android-приложение на
 //    телефоне), конвертация формата Health Connect в формат хаба
@@ -46,7 +53,8 @@ const ALLOWED_HOSTS = [
   "api.moonshot.cn",
   "api.kimi.ai",
   "api.kimi.com",
-  "api.deepseek.com"
+  "api.deepseek.com",
+  "public-api.gamma.app" // добавлено 10.08.2026 — генерация презентаций через Gamma API
 ];
 
 exports.proxy = onRequest(
@@ -78,7 +86,7 @@ exports.proxy = onRequest(
     }
 
     try {
-      const { url, headers, body } = req.body || {};
+      const { url, headers, body, method } = req.body || {};
       if (!url || typeof url !== "string") {
         res.status(400).json({ error: "Missing url" });
         return;
@@ -97,12 +105,18 @@ exports.proxy = onRequest(
         return;
       }
 
+      // Метод к АПСТРИМУ (не путать с req.method — тем, каким браузер обратился
+      // к самой Cloud Function, он всегда POST). По умолчанию "POST" — как было
+      // раньше для всех существующих вызовов, которые не передают method явно.
+      const upstreamMethod = (method ? String(method).toUpperCase() : "POST");
+
       const fetchHeaders = headers || {};
       const fetchOptions = {
-        method: "POST",
+        method: upstreamMethod,
         headers: { "Content-Type": "application/json", ...fetchHeaders }
       };
-      if (body !== undefined) {
+      // GET/HEAD не должны иметь тело — иначе fetch в Node бросит ошибку
+      if (body !== undefined && upstreamMethod !== "GET" && upstreamMethod !== "HEAD") {
         fetchOptions.body = typeof body === "string" ? body : JSON.stringify(body);
       }
 
