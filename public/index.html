@@ -3804,17 +3804,95 @@ async function renderPdfPagesAsImages(b64, pageNumbers){
     const pdf=await window.pdfjsLib.getDocument({data:bytes}).promise;
     const images=[];
     const pages=pageNumbers.slice(0,10); // ограничение, чтобы не зависнуть на огромных файлах
+    // Раньше рендерили с фиксированным scale:1.5 для ЛЮБОЙ страницы — на крупноформатных чертежах
+    // это давало нечитаемо мелкие отметки/размеры. Теперь масштаб считаем ПОД РЕАЛЬНЫЙ РАЗМЕР
+    // листа так, чтобы длинная сторона была около TARGET_LONG_EDGE пикселей. Для страниц ОГРОМНОГО
+    // формата (А1/А0) этого всё ещё недостаточно — см. renderDrawingPageTiles ниже, которая режет
+    // такие листы на тайлы. Эта функция используется для emptyPages (сканы/дизайн) — им обычно
+    // достаточно одной цельной картинки. Добавлено 16.08.2026.
+    const TARGET_LONG_EDGE = 2800;
     for(const p of pages){
       if(p<1||p>pdf.numPages) continue;
       const page=await pdf.getPage(p);
-      const viewport=page.getViewport({scale:1.5});
+      const baseViewport=page.getViewport({scale:1});
+      const longEdge=Math.max(baseViewport.width,baseViewport.height);
+      let scale=TARGET_LONG_EDGE/longEdge;
+      scale=Math.max(1.5,Math.min(scale,4)); // не мельче стандартного A4-качества, но и не безумно крупно
+      const viewport=page.getViewport({scale});
       const canvas=document.createElement("canvas");
       canvas.width=viewport.width; canvas.height=viewport.height;
       const ctx=canvas.getContext("2d");
       await page.render({canvasContext:ctx,viewport}).promise;
-      images.push({page:p, b64:canvas.toDataURL("image/jpeg",0.85).split(",")[1]});
+      let quality=0.92;
+      let dataUrl=canvas.toDataURL("image/jpeg",quality);
+      while(dataUrl.length*0.75 > 4*1024*1024 && quality > 0.5){
+        quality -= 0.1;
+        dataUrl=canvas.toDataURL("image/jpeg",quality);
+      }
+      images.push({page:p, b64:dataUrl.split(",")[1]});
     }
     return images;
+  }catch(e){ return []; }
+}
+
+// Инженерные чертежи большого формата (А1/А0 — сотни/тысячи pt по длинной стороне) даже при
+// максимально плотном рендере одним изображением упираются в то, что vision-API (Claude/Gemini/
+// GPT) сами уменьшают картинку примерно до ~1500px по длинной стороне ПЕРЕД анализом — то есть
+// просто рендерить крупнее бесполезно, мелкие размеры/отметки всё равно превратятся в кашу.
+// Решение — резать лист на сетку тайлов (по умолчанию 2×2, для очень вытянутых листов — 3×2 или
+// 2×3), каждый тайл рендерить в высоком разрешении и отправлять vision-агенту ОТДЕЛЬНОЙ картинкой
+// с подписью, к какой части листа она относится — тогда мелкий текст в каждом тайле остаётся
+// читаемым после внутреннего сжатия модели. Добавлено 16.08.2026 по разбору реального случая
+// (план котлована формата А1 — 2384×1684pt).
+async function renderDrawingPageTiles(b64, pageNumbers){
+  if(!window.pdfjsLib || !pageNumbers || !pageNumbers.length) return [];
+  try{
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc="vendor/pdf.worker.min.js";
+    const data=atob(b64); const bytes=new Uint8Array(data.length);
+    for(let i=0;i<data.length;i++) bytes[i]=data.charCodeAt(i);
+    const pdf=await window.pdfjsLib.getDocument({data:bytes}).promise;
+    const tiles=[];
+    const pages=pageNumbers.slice(0,4); // на чертёжные листы отдельный (более строгий) лимит — тайлов и так будет ×N на страницу
+    const TILE_TARGET_EDGE=2000; // пиксели на тайл — комфортно ниже потолка сжатия vision-API
+    for(const p of pages){
+      if(p<1||p>pdf.numPages) continue;
+      const page=await pdf.getPage(p);
+      const baseViewport=page.getViewport({scale:1});
+      // Сетка: 2×2 по умолчанию; для сильно вытянутых листов (альбомная ориентация с большим
+      // соотношением сторон) — 3 колонки, чтобы тайл не выходил слишком широким и мелкий текст
+      // по краям всё равно оставался читаемым.
+      const aspect=baseViewport.width/baseViewport.height;
+      const cols = aspect>1.6 ? 3 : 2;
+      const rows = aspect<0.63 ? 3 : 2;
+      // Рендерим лист целиком в разрешении, достаточном чтобы КАЖДЫЙ тайл вышел ~TILE_TARGET_EDGE
+      const fullLongEdge=Math.max(baseViewport.width,baseViewport.height);
+      const wantedFullLongEdge=TILE_TARGET_EDGE*Math.max(cols,rows);
+      const scale=Math.max(1.5,Math.min(wantedFullLongEdge/fullLongEdge,6));
+      const viewport=page.getViewport({scale});
+      const fullCanvas=document.createElement("canvas");
+      fullCanvas.width=viewport.width; fullCanvas.height=viewport.height;
+      const fullCtx=fullCanvas.getContext("2d");
+      await page.render({canvasContext:fullCtx,viewport}).promise;
+
+      const tileW=Math.ceil(fullCanvas.width/cols);
+      const tileH=Math.ceil(fullCanvas.height/rows);
+      for(let row=0; row<rows; row++){
+        for(let col=0; col<cols; col++){
+          const tileCanvas=document.createElement("canvas");
+          tileCanvas.width=tileW; tileCanvas.height=tileH;
+          const tctx=tileCanvas.getContext("2d");
+          tctx.drawImage(fullCanvas, col*tileW, row*tileH, tileW, tileH, 0, 0, tileW, tileH);
+          let quality=0.92;
+          let dataUrl=tileCanvas.toDataURL("image/jpeg",quality);
+          while(dataUrl.length*0.75 > 4*1024*1024 && quality > 0.5){
+            quality -= 0.1;
+            dataUrl=tileCanvas.toDataURL("image/jpeg",quality);
+          }
+          tiles.push({page:p, tileLabel:"область "+(row+1)+"-"+(col+1)+" из "+rows+"×"+cols, b64:dataUrl.split(",")[1]});
+        }
+      }
+    }
+    return tiles;
   }catch(e){ return []; }
 }
 
@@ -3983,29 +4061,39 @@ function handleFiles(input){
         const txt=pdfResult.text;
         if(txt) obj.text=txt;
         showToast(txt?"✅ PDF прочитан":"⚠️ PDF: текст не извлечён");
-        // Постранично: если на КОНКРЕТНЫХ страницах не нашлось текстового слоя (дизайнерские
-        // карточки, сканы, векторный текст) ИЛИ страница — чертёж крупного формата (drawingPages,
-        // см. extractPdfText) — рендерим именно ИХ как изображения, чтобы vision-агент увидел
-        // саму схему/план, а не разрозненный текст подписей без расположения на листе.
-        const imagePages=[...new Set([...(pdfResult.emptyPages||[]),...(pdfResult.drawingPages||[])])].sort((a,b)=>a-b);
-        if(imagePages.length){
+        const claudeKeyForVision=getKeys().claude;
+        // Случай 1: страницы БЕЗ текстового слоя вообще (сканы, дизайнерские карточки) —
+        // рендерим целиком одной картинкой, этого обычно достаточно.
+        if(pdfResult.emptyPages && pdfResult.emptyPages.length){
           try{
-            showToast("🖼️ Стр. "+imagePages.join(", ")+" — рендерю как изображение для vision-агентов...");
-            const pageImages=await renderPdfPagesAsImages(b64,imagePages);
-            const claudeKeyForVision=getKeys().claude;
+            showToast("🖼️ Стр. "+pdfResult.emptyPages.join(", ")+" без текста — рендерю как изображение...");
+            const pageImages=await renderPdfPagesAsImages(b64,pdfResult.emptyPages);
             for(const img of pageImages){
               currentFiles.push({name:f.name+" — стр."+img.page,type:"image/jpeg",b64:img.b64,size:Math.round(img.b64.length*0.75),text:null});
-              // Платную авто-расшифровку через Claude Vision делаем ТОЛЬКО для страниц БЕЗ текстового
-              // слоя вообще (emptyPages) — для чертежей (drawingPages) уже есть извлечённый текст как
-              // запасной контекст, а саму картинку разберёт тот агент, который отвечает на вопрос —
-              // без лишнего платного прогона через Vision AI заранее.
-              if(claudeKeyForVision && pdfResult.emptyPages && pdfResult.emptyPages.includes(img.page)){
+              // Платную авто-расшифровку через Claude Vision делаем именно для этих страниц —
+              // текстового слоя у них нет вообще, запасного контекста иначе не будет.
+              if(claudeKeyForVision){
                 const visionTxt=await transcribePageWithVision(claudeKeyForVision,img.b64,"image/jpeg");
                 if(visionTxt) obj.text=(obj.text||"")+"\n--- Стр."+img.page+" (распознано Vision AI) ---\n"+visionTxt;
               }
             }
-            if(pageImages.length) showToast("✅ Добавлено "+pageImages.length+" стр. как изображения — агент с vision разберёт их напрямую");
+            if(pageImages.length) showToast("✅ Добавлено "+pageImages.length+" стр. как изображения");
           }catch(pe){ /* тихо пропускаем, если рендер/распознавание страниц не удался */ }
+        }
+        // Случай 2: чертёж крупного формата (drawingPages, см. extractPdfText) — целиком одной
+        // картинкой мелкий текст/размеры не разобрать (vision-API сами сжимают картинку перед
+        // анализом), поэтому режем на тайлы через renderDrawingPageTiles — каждый тайл остаётся
+        // читаемым. Платную Vision-расшифровку сюда не гоняем: тайлов может быть много (до 12 на
+        // файл), это будет дорого — саму картинку(и) разберёт агент, отвечающий на вопрос.
+        if(pdfResult.drawingPages && pdfResult.drawingPages.length){
+          try{
+            showToast("🖼️ Стр. "+pdfResult.drawingPages.join(", ")+" — чертёж крупного формата, режу на тайлы...");
+            const tiles=await renderDrawingPageTiles(b64,pdfResult.drawingPages);
+            for(const tile of tiles){
+              currentFiles.push({name:f.name+" — стр."+tile.page+", "+tile.tileLabel,type:"image/jpeg",b64:tile.b64,size:Math.round(tile.b64.length*0.75),text:null});
+            }
+            if(tiles.length) showToast("✅ Добавлено "+tiles.length+" тайлов чертежа — агент с vision разберёт их напрямую");
+          }catch(pe){ /* тихо пропускаем, если рендер тайлов не удался */ }
         }
       } else if(f.type.startsWith("image/")){
         const sendBtn=document.getElementById("sendBtn");
