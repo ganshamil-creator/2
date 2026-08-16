@@ -606,6 +606,7 @@
   <button onclick="openMemoryModal()" id="memoryBtn" title="Сквозная память" style="padding:5px 10px;background:#f5f3ff;border:1px solid #c4b5fd;border-radius:6px;color:#7c3aed;font-size:14px;position:relative">🧠<span id="memoryBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:#7c3aed;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;line-height:14px;text-align:center"></span></button>
   <button onclick="toggleHealthMode()" id="healthBtn" title="Health Manager" style="padding:5px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;color:#16a34a;font-size:14px">🫀</button>
   <button onclick="toggleQuickMode()" id="quickBtn" title="Быстрый режим — один AI без синтеза" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:14px">⚡</button>
+  <button onclick="toggleCodeDuoMode()" id="codeDuoBtn" title="Код-дуэт — Gemini + DeepSeek (бесплатно/дёшево), без Claude/GPT" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:14px">👨‍💻</button>
   <button onclick="toggleCodeExec()" id="codeExecBtn" title="Выполнение кода — Claude сможет реально запускать код и показывать результат" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:14px">🖥️</button>
   <button onclick="toggleSearch()" id="searchBtn" title="Веб-поиск (Tavily)" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:14px">🌐</button>
   <button onclick="showSettings()" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:18px;line-height:1">⚙️</button>
@@ -619,6 +620,13 @@
   <select id="quickRole" style="padding:5px 10px;background:#fff;border:1px solid #fde047;border-radius:7px;color:#1e293b;font-size:13px"></select>
   <span style="font-size:12px;color:#78350f">Отвечает только 1 AI — быстро и без синтеза</span>
   <button onclick="toggleQuickMode()" style="margin-left:auto;background:none;border:none;color:#92400e;font-size:16px;cursor:pointer">✕</button>
+</div>
+
+<!-- CODE DUO BAR -->
+<div id="codeDuoBar" style="display:none;padding:8px 12px;background:#ecfeff;border-top:1px solid #67e8f9;flex-shrink:0;align-items:center;gap:8px;flex-wrap:wrap">
+  <span style="font-size:13px;font-weight:600;color:#0e7490">👨‍💻 Код-дуэт:</span>
+  <span style="font-size:12px;color:#155e75">🔴 Gemini + ⚡ DeepSeek синтезируют ответ вместе — без Claude/GPT, чтобы не тратить деньги на дорогие токены</span>
+  <button onclick="toggleCodeDuoMode()" style="margin-left:auto;background:none;border:none;color:#0e7490;font-size:16px;cursor:pointer">✕</button>
 </div>
 
 <div id="healthBar" style="display:none;padding:10px 14px;background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-bottom:2px solid #4ade80;flex-shrink:0">
@@ -903,7 +911,10 @@ function buildRawHistoryFromChat(chat){
   }
   return rawHistory;
 }
-function getAgents(){ return ALL_AGENTS.filter(a=>activeAgentIds.includes(a.id)); }
+function getAgents(){
+  if(codeDuoMode) return ALL_AGENTS.filter(a=>CODE_DUO_IDS.includes(a.id));
+  return ALL_AGENTS.filter(a=>activeAgentIds.includes(a.id));
+}
 
 function getToday(){
   const n=new Date();
@@ -930,6 +941,12 @@ const ALL_AGENTS = [
   {id:"gpt",       name:"GPT-5.6",     emoji:"🟢", color:"#10a779", badge:"Luna", tag:"Практичные советы",
    system:"Ты GPT-5.6 Luna от OpenAI. Давай практичные пошаговые решения и конкретные рекомендации. Специализируешься на прикладных задачах, инструкциях и советах. Если есть контекст от предыдущих агентов — обогати его практическими советами. Используй дату из контекста."+FILE_EXPORT_NOTE},
 ];
+
+// Код-дуэт: пара агентов для кодовых задач, имитирующая связку Claude+GPT из Abacus AI xHigh,
+// но БЕЗ Claude/GPT — оба стоят денег за токены, а Gemini (бесплатный тариф aistudio.google.com)
+// и DeepSeek (тег "Дешёвый код") вместе дают почти нулевую стоимость за диалог.
+const CODE_DUO_IDS = ["gemini","deepseek"];
+let codeDuoMode = false;
 
 // Claude Fable 5 — премиальная Mythos-модель. НЕ входит в ALL_AGENTS (чтобы не участвовать
 // в параллельном/цепочном режимах по умолчанию — дорого), доступна только через Quick Mode.
@@ -3752,16 +3769,26 @@ async function extractPdfText(b64){
     const pdf=await window.pdfjsLib.getDocument({data:bytes}).promise;
     let text="";
     const emptyPages=[]; // номера страниц БЕЗ настоящего текстового слоя (картинки/вектор/сканы)
+    const drawingPages=[]; // страницы большого чертёжного формата (А2/А1/А0) — см. ниже
     for(let p=1;p<=pdf.numPages;p++){
       const page=await pdf.getPage(p);
       const content=await page.getTextContent();
       const pageText=content.items.map(i=>i.str).join(" ").trim();
       if(pageText.length<20) emptyPages.push(p);
+      // Инженерный чертёж (план, разрез, схема) почти всегда экспортируется в крупном формате
+      // (А2 и больше — примерно от 1000pt по большей стороне при 72dpi), а сам текстовый слой
+      // на нём — это разрозненные подписи/отметки/таблица, разбросанные по листу без связной
+      // структуры. pdf.js их всё равно "видит" как текст (>20 символов), поэтому раньше такая
+      // страница НЕ считалась emptyPages и никогда не рендерилась как картинка — vision-агенты
+      // получали только нечитаемый обрывочный текст вместо самого чертежа со схемой/размерами.
+      // Добавлено 16.08.2026 после разбора реального случая (план котлована, скважины ИГЭ).
+      const vp=page.getViewport({scale:1});
+      if(Math.max(vp.width,vp.height) > 1000 && !emptyPages.includes(p)) drawingPages.push(p);
       text+="\n--- Стр."+p+" ---\n"+(pageText||"[на этой странице нет текстового слоя — см. изображение страницы]");
     }
     text=text.trim();
-    return {text: text.length>15?text:null, emptyPages, totalPages: pdf.numPages};
-  }catch(e){ return {text:null, emptyPages:[], totalPages:0}; }
+    return {text: text.length>15?text:null, emptyPages, drawingPages, totalPages: pdf.numPages};
+  }catch(e){ return {text:null, emptyPages:[], drawingPages:[], totalPages:0}; }
 }
 
 // Рендерит КОНКРЕТНЫЕ страницы PDF как JPEG-изображения (base64) — используется для тех
@@ -3957,23 +3984,27 @@ function handleFiles(input){
         if(txt) obj.text=txt;
         showToast(txt?"✅ PDF прочитан":"⚠️ PDF: текст не извлечён");
         // Постранично: если на КОНКРЕТНЫХ страницах не нашлось текстового слоя (дизайнерские
-        // карточки, сканы, векторный текст) — рендерим именно ИХ как изображения (для лучшей
-        // точности в ТЕКУЩЕМ ответе) И дополнительно прогоняем через Claude Vision, чтобы получить
-        // качественную расшифровку текста. Расшифровка сохраняется в obj.text — именно она (а не
-        // картинка) переносится в историю чата для уточняющих вопросов без повторного файла.
-        if(pdfResult.emptyPages && pdfResult.emptyPages.length){
+        // карточки, сканы, векторный текст) ИЛИ страница — чертёж крупного формата (drawingPages,
+        // см. extractPdfText) — рендерим именно ИХ как изображения, чтобы vision-агент увидел
+        // саму схему/план, а не разрозненный текст подписей без расположения на листе.
+        const imagePages=[...new Set([...(pdfResult.emptyPages||[]),...(pdfResult.drawingPages||[])])].sort((a,b)=>a-b);
+        if(imagePages.length){
           try{
-            showToast("🖼️ Стр. "+pdfResult.emptyPages.join(", ")+" без текста — распознаю через Vision AI...");
-            const pageImages=await renderPdfPagesAsImages(b64,pdfResult.emptyPages);
+            showToast("🖼️ Стр. "+imagePages.join(", ")+" — рендерю как изображение для vision-агентов...");
+            const pageImages=await renderPdfPagesAsImages(b64,imagePages);
             const claudeKeyForVision=getKeys().claude;
             for(const img of pageImages){
               currentFiles.push({name:f.name+" — стр."+img.page,type:"image/jpeg",b64:img.b64,size:Math.round(img.b64.length*0.75),text:null});
-              if(claudeKeyForVision){
+              // Платную авто-расшифровку через Claude Vision делаем ТОЛЬКО для страниц БЕЗ текстового
+              // слоя вообще (emptyPages) — для чертежей (drawingPages) уже есть извлечённый текст как
+              // запасной контекст, а саму картинку разберёт тот агент, который отвечает на вопрос —
+              // без лишнего платного прогона через Vision AI заранее.
+              if(claudeKeyForVision && pdfResult.emptyPages && pdfResult.emptyPages.includes(img.page)){
                 const visionTxt=await transcribePageWithVision(claudeKeyForVision,img.b64,"image/jpeg");
                 if(visionTxt) obj.text=(obj.text||"")+"\n--- Стр."+img.page+" (распознано Vision AI) ---\n"+visionTxt;
               }
             }
-            if(pageImages.length) showToast("✅ Распознано "+pageImages.length+" страниц"+(claudeKeyForVision?" через Vision AI":" (только как изображения — добавь ключ Claude для расшифровки в текст)"));
+            if(pageImages.length) showToast("✅ Добавлено "+pageImages.length+" стр. как изображения — агент с vision разберёт их напрямую");
           }catch(pe){ /* тихо пропускаем, если рендер/распознавание страниц не удался */ }
         }
       } else if(f.type.startsWith("image/")){
@@ -4701,6 +4732,28 @@ function populateQuickAgentSelect(){
   // callAgent/callByAgentId — он просто больше никогда не вызывается, раз выбрать его негде.
   sel.innerHTML = html;
   if(prev && [...sel.options].some(o=>o.value===prev)) sel.value = prev;
+}
+
+// Код-дуэт — ограничивает Параллельный/Цепочный режимы только Gemini+DeepSeek (см. CODE_DUO_IDS),
+// не трогая обычный набор активных агентов (activeAgentIds) из ⚙️ Настроек — просто временно
+// подменяет то, что возвращает getAgents(), пока режим включён.
+function toggleCodeDuoMode(){
+  codeDuoMode = !codeDuoMode;
+  const bar = document.getElementById("codeDuoBar");
+  const btn = document.getElementById("codeDuoBtn");
+  if(bar) bar.style.display = codeDuoMode ? "flex" : "none";
+  if(btn){
+    btn.style.background = codeDuoMode ? "#a5f3fc" : "#f1f5f9";
+    btn.style.color = codeDuoMode ? "#0e7490" : "#475569";
+    btn.style.borderColor = codeDuoMode ? "#67e8f9" : "#e2e8f0";
+  }
+  if(codeDuoMode){
+    if(quickMode) populateQuickAgentSelect(); // если открыт и Быстрый режим — обновить список под дуэт
+    showToast("👨‍💻 Код-дуэт включён: Gemini + DeepSeek (бесплатно/дёшево)");
+  } else {
+    if(quickMode) populateQuickAgentSelect();
+    showToast("👨‍💻 Код-дуэт выключен — снова все активные агенты");
+  }
 }
 
 function toggleChainMode(){
