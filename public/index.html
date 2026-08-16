@@ -3087,8 +3087,12 @@ async function getManagedHistory(chat, rawHistory){
 function calcTokens(history){
   const lastMsg = history && history.length>0 ? 
     (history[history.length-1].content || "") : "";
-  const text = Array.isArray(lastMsg) ? 
-    (lastMsg.find(c=>c.type==="text")?.text||"") : lastMsg;
+  // Берём ПОСЛЕДНИЙ текстовый блок, а не первый: с 16.08.2026 перед каждой картинкой добавляется
+  // короткая подпись [Изображение: ...] — если брать первый текстовый блок, вместо настоящего
+  // вопроса пользователя сюда попадала бы именно эта подпись (реальный вопрос всегда добавляется
+  // в конец массива, после всех картинок).
+  const textBlocks = Array.isArray(lastMsg) ? lastMsg.filter(c=>c.type==="text") : null;
+  const text = textBlocks ? (textBlocks[textBlocks.length-1]?.text||"") : lastMsg;
   const t = text.toLowerCase();
   
   // Ключевые слова для большого объёма
@@ -3112,10 +3116,18 @@ function calcTokens(history){
   
   const isBig = bigKeywords.some(k => t.includes(k));
   const isMedium = mediumKeywords.some(k => t.includes(k)) || len > 300;
-  
-  if(isBig) return 8000;      // Презентации, большие документы
-  if(isMedium) return 3000;   // Развёрнутые объяснения
-  return 1500;                 // Обычные вопросы — быстро
+
+  // Картинки (особенно несколько тайлов чертежа — см. renderDrawingPageTiles) требуют от
+  // reasoning-моделей (например GPT-5.6) заметно больше "внутренних" токенов на анализ, ещё
+  // до того как появится видимый текст ответа. При низком бюджете это может привести к пустому
+  // ответу (весь лимит уходит на размышления, на сам ответ токенов не остаётся) — поэтому
+  // поднимаем минимальный бюджет пропорционально числу приложенных картинок. Добавлено 16.08.2026.
+  const imageCount = Array.isArray(lastMsg) ? lastMsg.filter(c=>c.type==="image_url"||c.type==="image").length : 0;
+  const imageFloor = imageCount>0 ? Math.min(4000+imageCount*500, 12000) : 0;
+
+  if(isBig) return Math.max(8000, imageFloor);      // Презентации, большие документы
+  if(isMedium) return Math.max(3000, imageFloor);   // Развёрнутые объяснения
+  return Math.max(1500, imageFloor);                 // Обычные вопросы — быстро
 }
 
 // ── Proxy helper (для мобильных) ──────────────────────────────
@@ -3213,7 +3225,10 @@ async function callOpenAI(key, system, history){
 // Определяем модель Claude по сложности запроса
 function pickClaudeModel(history){
   const last=history[history.length-1];
-  const text=(Array.isArray(last?.content)?last.content.find(c=>c.type==="text")?.text||"":last?.content||"").toLowerCase();
+  // Тот же фикс, что и в calcTokens — берём ПОСЛЕДНИЙ текстовый блок (реальный вопрос),
+  // а не первый (теперь это подпись картинки при вложенных файлах).
+  const textBlocks=Array.isArray(last?.content)?last.content.filter(c=>c.type==="text"):null;
+  const text=(textBlocks?(textBlocks[textBlocks.length-1]?.text||""):last?.content||"").toLowerCase();
   const heavy=["слайд","presentation","презентац","подробно","детально","анализ","стратег","бизнес план","эссе","реферат","диплом","промпт","перевед","translate","summarize","сравни","сравнение"];
   const hasFile=history.some(m=>Array.isArray(m.content)&&m.content.some(c=>c.type==="image"||c.type==="document"));
   if(hasFile||heavy.some(k=>text.includes(k))||text.length>400) return "claude-sonnet-5";
@@ -3572,7 +3587,11 @@ async function callDeepSeek(key, system, history, onChunk){
       }
     });
     const msgs=fixedHistory.map(m=>{
-      if(Array.isArray(m.content)) return {role:m.role,content:m.content.find(c=>c.type==="text")?.text||""};
+      // DeepSeek не видит картинки — берём ВСЕ текстовые блоки (не только первый), иначе с
+      // 16.08.2026, когда перед каждой картинкой добавляется подпись [Изображение: ...],
+      // .find() находил бы только первую подпись, а настоящий вопрос пользователя (он всегда
+      // последним текстовым блоком) терялся бы полностью.
+      if(Array.isArray(m.content)) return {role:m.role,content:m.content.filter(c=>c.type==="text").map(c=>c.text).join("\n")||""};
       return m;
     });
     const stream=!isMobile;
