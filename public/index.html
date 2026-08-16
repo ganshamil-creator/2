@@ -935,7 +935,7 @@ const ALL_AGENTS = [
   {id:"perplexity",name:"Perplexity", emoji:"🟣", color:"#8b5cf6", badge:"Agent API", tag:"Веб-поиск",
    system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."+FILE_EXPORT_NOTE},
   {id:"deepseek",  name:"DeepSeek",   emoji:"⚡", color:"#06b6d4", badge:"V4", tag:"Дешёвый код",
-   system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста."+FILE_EXPORT_NOTE},
+   system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста. ВАЖНО: ты НЕ умеешь видеть прикреплённые изображения/сканы/чертежи напрямую — тебе доступен только извлечённый из них текст (если он есть). Если этого текста недостаточно, чтобы ответить по существу (например, план/чертёж/схема, где важна именно визуальная структура), — прямо и честно скажи, что не можешь увидеть изображение и опираешься только на обрывочный текст, и НЕ придумывай/не угадывай, что может быть на картинке (название чертежа, цифры, схему и т.п.). Ложное уверенное угадывание хуже честного отказа."+FILE_EXPORT_NOTE},
   {id:"kimi",      name:"Kimi",       emoji:"🔵", color:"#3b82f6", badge:"K3", tag:"Длинные документы",
    system:"Ты Kimi K3 от Moonshot AI. Специализируешься на креативных задачах, финансовых расчётах и анализе длинных документов. Давай нестандартные практичные решения. Если есть контекст от предыдущих агентов — используй его и дополни своим уникальным взглядом. Используй дату из контекста. Отвечай именно на то, что спросили — не бери на себя лишнюю инициативу и не делай сверх запрошенного без явной просьбы."+FILE_EXPORT_NOTE},
   {id:"gpt",       name:"GPT-5.6",     emoji:"🟢", color:"#10a779", badge:"Luna", tag:"Практичные советы",
@@ -3540,8 +3540,11 @@ async function callPerplexity(key, system, history){
       }
       return {role:m.role, content:m.content};
     });
+    // web_search убран для картинок 16.08.2026 — незачем искать в вебе, когда задача просто
+    // внимательно прочитать конкретное изображение (например, чертёж); инструмент мог отвлекать
+    // модель на попытку что-то нагуглить вместо тщательного разбора самой картинки.
     const bodyObj = hasImages
-      ? {model:"openai/gpt-5.4", instructions:system, input:inputMessages, tools:[{type:"web_search"}]}
+      ? {model:"openai/gpt-5.4", instructions:system, input:inputMessages}
       : {preset:"fast", instructions:system, input:inputMessages};
     const pBody=JSON.stringify(bodyObj);
     // Perplexity API не отдаёт CORS-заголовки для браузерных запросов —
@@ -4767,7 +4770,21 @@ function renderFilePreview(){
   const clearAll=currentFiles.length>1
     ? "<button onclick='clearFiles()' style='align-self:flex-end;background:none;border:none;color:#94a3b8;font-size:11px;cursor:pointer;text-decoration:underline;padding:0'>Очистить все ("+currentFiles.length+")</button>"
     : "";
-  p.innerHTML=rows+clearAll;
+  // Предупреждение о DeepSeek: он не умеет видеть изображения (только текст, см. callDeepSeek).
+  // Если сейчас реально может ответить ИМЕННО и ТОЛЬКО DeepSeek (Быстрый режим с ним выбранным),
+  // предупреждаем заранее, а не постфактум, когда придёт выдуманный ответ. В Код-дуэте DeepSeek —
+  // не единственный агент (Gemini картинку видит), так что там предупреждение мягче.
+  const hasImages=currentFiles.some(f=>f.type.startsWith("image/")||f.type==="application/pdf");
+  let visionWarning="";
+  if(hasImages){
+    const quickSel=document.getElementById("quickAgent");
+    if(quickMode && quickSel && quickSel.value==="deepseek"){
+      visionWarning="<div style='font-size:11px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 8px'>⚠️ DeepSeek не видит изображения/чертежи — только извлечённый текст. Для этого файла выбери другого агента.</div>";
+    } else if(codeDuoMode){
+      visionWarning="<div style='font-size:11px;color:#0e7490;background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;padding:6px 8px'>ℹ️ В код-дуэте картинку/чертёж реально увидит только Gemini — DeepSeek работает по тексту.</div>";
+    }
+  }
+  p.innerHTML=rows+clearAll+visionWarning;
 }
 
 function removeFile(i){
@@ -4914,6 +4931,10 @@ async function sendQuick(text, inp){
   if(imageFiles.length>0){
     fileCtx+="\n[Изображений: "+imageFiles.length+"]\n";
     for(const f of imageFiles){ if(f.text) fileCtx+=f.text+"\n"; }
+    // См. аналогичную заметку в параллельном/цепочном режиме — та же логика для тайлов чертежа.
+    if(imageFiles.some(f=>f.name && f.name.includes("область "))){
+      fileCtx+="\nВАЖНО: некоторые из приложенных изображений — это части ОДНОГО большого чертёжного листа, разрезанного на тайлы (подпись у каждого: 'стр.N, область R-C из R×C'). Мысленно собери их в единую схему по подписям и координатам сетки, прежде чем отвечать. Если значение обрезано на границе тайла — поищи продолжение на соседнем по сетке тайле.\n";
+    }
   }
 
   const crossCtx=(getCrossModeContext()||'').slice(0,1000);
@@ -4933,12 +4954,12 @@ async function sendQuick(text, inp){
   if(imageFiles.length>0){
     if(agentId==="claude"||agentId==="fable"){
       const content=[];
-      imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
+      imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
       content.push({type:"text",text:enrichedMsg});
       agentHistory=[...history.slice(0,-1),{role:"user",content}];
     } else if(["gpt","gemini","perplexity","kimi"].includes(agentId)){
       const content=[];
-      imageFiles.forEach(f=>content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}}));
+      imageFiles.forEach(f=>{content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}});});
       content.push({type:"text",text:enrichedMsg});
       agentHistory=[...history.slice(0,-1),{role:"user",content}];
     }
@@ -5106,11 +5127,11 @@ async function sendFirst(){
         const lastMsg=agentHistory[agentHistory.length-1];
         if(a.id==="claude"){
           const content=[{type:"text",text:lastMsg.content}];
-          imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
+          imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
           agentHistory=[...agentHistory.slice(0,-1),{role:"user",content}];
         } else if(["gemini","gpt","perplexity","kimi"].includes(a.id)){
           const content=[];
-          imageFiles.forEach(f=>content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}}));
+          imageFiles.forEach(f=>{content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}});});
           content.push({type:"text",text:lastMsg.content});
           agentHistory=[...agentHistory.slice(0,-1),{role:"user",content}];
         }
@@ -5195,11 +5216,11 @@ async function sendChain(text, inp){
     if(!imageFiles.length) return [...baseHistory.slice(0,-1),{role:"user",content:today+msgText}];
     if(a.id==="claude"){
       const content=[{type:"text",text:today+msgText}];
-      imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
+      imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
       return [...baseHistory.slice(0,-1),{role:"user",content}];
     } else if(visionSet.has(a.id)){
       const content=[];
-      imageFiles.forEach(f=>content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}}));
+      imageFiles.forEach(f=>{content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}});});
       content.push({type:"text",text:today+msgText});
       return [...baseHistory.slice(0,-1),{role:"user",content}];
     }
@@ -5469,6 +5490,13 @@ async function send(){
   } else if(otherFiles.length>0 && needTranslation){
     taskInstruction="\n\nЗАДАНИЕ: Переведи весь текст из файла на запрошенный язык. Сохрани форматирование. Переводи полностью, не сокращай.";
   }
+  // Если среди картинок есть тайлы одного чертежа (см. renderDrawingPageTiles) — явно объясняем
+  // модели, что это куски ОДНОГО большого листа, а не отдельные разные изображения, иначе модель
+  // может не сопоставить размерные цепочки, идущие через границу тайлов, и решить, что данных
+  // недостаточно. Добавлено 16.08.2026.
+  if(imageFiles.some(f=>f.name && f.name.includes("область "))){
+    taskInstruction+="\n\nВАЖНО: некоторые из приложенных изображений — это части ОДНОГО большого чертёжного листа, разрезанного на тайлы (подпись у каждого вида: 'стр.N, область R-C из R×C'). Мысленно собери их в единую схему по подписям и координатам сетки, прежде чем отвечать — не считай их не связанными друг с другом изображениями. Если конкретное значение обрезано на границе тайла, поищи его продолжение на соседнем по сетке тайле.";
+  }
 
   // Tavily search
   let searchCtx="";
@@ -5486,7 +5514,7 @@ async function send(){
     if(!imageFiles.length) return history;
     const last=history[history.length-1];
     const content=[];
-    imageFiles.forEach(f=>content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}}));
+    imageFiles.forEach(f=>{content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}});});
     // Добавляем чёткое задание для vision агентов
     const visionTask=needTranslation
       ? `${text||""}\n\nПрочитай ВЕСЬ текст на изображении и переведи его на запрошенный язык. Покажи оригинал и перевод.`
@@ -5499,6 +5527,7 @@ async function send(){
     const content=[];
     imageFiles.forEach(f=>{
       const mt=f.type==="image/jpg"?"image/jpeg":f.type;
+      content.push({type:"text",text:"[Изображение: "+f.name+"]"});
       content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});
     });
     const visionTask=needTranslation
