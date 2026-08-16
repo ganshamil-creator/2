@@ -935,7 +935,7 @@ const ALL_AGENTS = [
   {id:"perplexity",name:"Perplexity", emoji:"🟣", color:"#8b5cf6", badge:"Agent API", tag:"Веб-поиск",
    system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."+FILE_EXPORT_NOTE},
   {id:"deepseek",  name:"DeepSeek",   emoji:"⚡", color:"#06b6d4", badge:"V4", tag:"Дешёвый код",
-   system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста."+FILE_EXPORT_NOTE},
+   system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста. ВАЖНО: ты НЕ умеешь видеть прикреплённые изображения/сканы/чертежи напрямую — тебе доступен только извлечённый из них текст (если он есть). Если этого текста недостаточно, чтобы ответить по существу (например, план/чертёж/схема, где важна именно визуальная структура), — прямо и честно скажи, что не можешь увидеть изображение и опираешься только на обрывочный текст, и НЕ придумывай/не угадывай, что может быть на картинке (название чертежа, цифры, схему и т.п.). Ложное уверенное угадывание хуже честного отказа."+FILE_EXPORT_NOTE},
   {id:"kimi",      name:"Kimi",       emoji:"🔵", color:"#3b82f6", badge:"K3", tag:"Длинные документы",
    system:"Ты Kimi K3 от Moonshot AI. Специализируешься на креативных задачах, финансовых расчётах и анализе длинных документов. Давай нестандартные практичные решения. Если есть контекст от предыдущих агентов — используй его и дополни своим уникальным взглядом. Используй дату из контекста. Отвечай именно на то, что спросили — не бери на себя лишнюю инициативу и не делай сверх запрошенного без явной просьбы."+FILE_EXPORT_NOTE},
   {id:"gpt",       name:"GPT-5.6",     emoji:"🟢", color:"#10a779", badge:"Luna", tag:"Практичные советы",
@@ -4770,7 +4770,21 @@ function renderFilePreview(){
   const clearAll=currentFiles.length>1
     ? "<button onclick='clearFiles()' style='align-self:flex-end;background:none;border:none;color:#94a3b8;font-size:11px;cursor:pointer;text-decoration:underline;padding:0'>Очистить все ("+currentFiles.length+")</button>"
     : "";
-  p.innerHTML=rows+clearAll;
+  // Предупреждение о DeepSeek: он не умеет видеть изображения (только текст, см. callDeepSeek).
+  // Если сейчас реально может ответить ИМЕННО и ТОЛЬКО DeepSeek (Быстрый режим с ним выбранным),
+  // предупреждаем заранее, а не постфактум, когда придёт выдуманный ответ. В Код-дуэте DeepSeek —
+  // не единственный агент (Gemini картинку видит), так что там предупреждение мягче.
+  const hasImages=currentFiles.some(f=>f.type.startsWith("image/")||f.type==="application/pdf");
+  let visionWarning="";
+  if(hasImages){
+    const quickSel=document.getElementById("quickAgent");
+    if(quickMode && quickSel && quickSel.value==="deepseek"){
+      visionWarning="<div style='font-size:11px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 8px'>⚠️ DeepSeek не видит изображения/чертежи — только извлечённый текст. Для этого файла выбери другого агента.</div>";
+    } else if(codeDuoMode){
+      visionWarning="<div style='font-size:11px;color:#0e7490;background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;padding:6px 8px'>ℹ️ В код-дуэте картинку/чертёж реально увидит только Gemini — DeepSeek работает по тексту.</div>";
+    }
+  }
+  p.innerHTML=rows+clearAll+visionWarning;
 }
 
 function removeFile(i){
