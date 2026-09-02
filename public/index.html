@@ -451,7 +451,7 @@
     <!-- Guide banner -->
     <div style="background:linear-gradient(135deg,#0f172a,#1e293b);border:1px solid #334155;border-radius:10px;padding:12px;margin-bottom:12px;font-size:10px;color:#94a3b8;line-height:1.7">
       <div style="color:#4ade80;font-weight:700;margin-bottom:6px">✅ OpenRouter больше не нужен — каждый AI работает напрямую</div>
-      <div>🟠 <b style="color:#fbbf24">Claude</b> — <a href="https://console.anthropic.com" target="_blank" style="color:#60a5fa">console.anthropic.com</a> → API Keys</div>
+      <div>🟠 <b style="color:#fbbf24">GLM-5.3-Flash</b> — <a href="https://z.ai" target="_blank" style="color:#60a5fa">z.ai</a> → API Keys → <b style="color:#4ade80">Дёшево + зрение</b></div>
       <div>🔴 <b style="color:#f87171">Gemini</b> — <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#60a5fa">aistudio.google.com/apikey</a> → <b style="color:#4ade80">Бесплатно</b></div>
       <div>🟣 <b style="color:#c084fc">Perplexity</b> — <a href="https://www.perplexity.ai/settings/api" target="_blank" style="color:#60a5fa">perplexity.ai/settings/api</a></div>
       <div>⚡ <b style="color:#22d3ee">DeepSeek</b> — <a href="https://platform.deepseek.com/api_keys" target="_blank" style="color:#60a5fa">platform.deepseek.com</a> → <b style="color:#4ade80">Очень дёшево</b></div>
@@ -461,15 +461,17 @@
 
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px" id="keyFields">
 
-      <!-- Claude -->
+      <!-- Claude -> заменено на GLM-5.3-Flash 02.09.2026, id/поле оставлены "claude" внутри кода, чтобы не переписывать все ссылки -->
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-          <span>🟠</span><span style="font-size:11px;font-weight:600;color:#d97706">Claude</span>
-          <span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:3px;margin-left:auto">Рекомендуем</span>
+          <span>🟠</span><span style="font-size:11px;font-weight:600;color:#d97706">GLM-5.3-Flash</span>
+          <span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:3px;margin-left:auto">Дёшево + зрение</span>
         </div>
-        <input type="password" id="key_claude" placeholder="sk-ant-api03-..." style="width:100%;padding:7px 10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;color:#1e293b;font-size:12px"/>
-        <div style="font-size:10px;color:#6b7280;margin-top:4px">console.anthropic.com → API Keys → Create Key</div>
+        <input type="password" id="key_claude" placeholder="глм-ключ (z.ai)..." style="width:100%;padding:7px 10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;color:#1e293b;font-size:12px"/>
+        <div style="font-size:10px;color:#6b7280;margin-top:4px">z.ai → API Keys → Create Key. Раньше здесь был Claude — заменили на более дешёвую модель 02.09.2026.</div>
       </div>
+      <!-- ключ по-прежнему хранится как keys.claude — переименование поля затронуло бы слишком много мест в коде -->
+      
 
       <!-- Gemini -->
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px">
@@ -606,8 +608,9 @@
   <button onclick="openMemoryModal()" id="memoryBtn" title="Сквозная память" style="padding:5px 10px;background:#f5f3ff;border:1px solid #c4b5fd;border-radius:6px;color:#7c3aed;font-size:14px;position:relative">🧠<span id="memoryBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:#7c3aed;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;line-height:14px;text-align:center"></span></button>
   <button onclick="toggleHealthMode()" id="healthBtn" title="Health Manager" style="padding:5px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;color:#16a34a;font-size:14px">🫀</button>
   <button onclick="toggleQuickMode()" id="quickBtn" title="Быстрый режим — один AI без синтеза" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:14px">⚡</button>
-  <button onclick="toggleCodeDuoMode()" id="codeDuoBtn" title="Код-дуэт — Gemini + DeepSeek (бесплатно/дёшево), без Claude/GPT" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:14px">👨‍💻</button>
-  <button onclick="toggleCodeExec()" id="codeExecBtn" title="Выполнение кода — Claude сможет реально запускать код и показывать результат" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:14px">🖥️</button>
+  <!-- 👨‍💻 Код-дуэт убран 02.09.2026 — терял смысл после замены агента "claude" на дешёвый GLM-5.3-Flash
+  <!-- 🖥️ Выполнение кода убрано 02.09.2026 — было завязано на серверный инструмент code_execution,
+       уникальный именно для Anthropic API; после замены агента на GLM-5.3-Flash аналога нет. -->
   <button onclick="toggleSearch()" id="searchBtn" title="Веб-поиск (Tavily)" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:14px">🌐</button>
   <button onclick="showSettings()" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:18px;line-height:1">⚙️</button>
 </div>
@@ -622,12 +625,7 @@
   <button onclick="toggleQuickMode()" style="margin-left:auto;background:none;border:none;color:#92400e;font-size:16px;cursor:pointer">✕</button>
 </div>
 
-<!-- CODE DUO BAR -->
-<div id="codeDuoBar" style="display:none;padding:8px 12px;background:#ecfeff;border-top:1px solid #67e8f9;flex-shrink:0;align-items:center;gap:8px;flex-wrap:wrap">
-  <span style="font-size:13px;font-weight:600;color:#0e7490">👨‍💻 Код-дуэт:</span>
-  <span style="font-size:12px;color:#155e75">🔴 Gemini + ⚡ DeepSeek синтезируют ответ вместе — без Claude/GPT, чтобы не тратить деньги на дорогие токены</span>
-  <button onclick="toggleCodeDuoMode()" style="margin-left:auto;background:none;border:none;color:#0e7490;font-size:16px;cursor:pointer">✕</button>
-</div>
+<!-- CODE DUO BAR убран 02.09.2026 вместе с кнопкой -->
 
 <div id="healthBar" style="display:none;padding:10px 14px;background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-bottom:2px solid #4ade80;flex-shrink:0">
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
@@ -872,7 +870,6 @@ document.addEventListener("visibilitychange", function(){
 });
 let currentFiles = [];
 let searchEnabled = false;
-let codeExecEnabled = false;
 let activeAgentIds = JSON.parse(localStorage.getItem("active_agents")||"null") || ["claude","gemini","perplexity","deepseek"];
 
 function getChat(){ return chats.find(c=>c.id===activeChatId); }
@@ -912,7 +909,6 @@ function buildRawHistoryFromChat(chat){
   return rawHistory;
 }
 function getAgents(){
-  if(codeDuoMode) return ALL_AGENTS.filter(a=>CODE_DUO_IDS.includes(a.id));
   return ALL_AGENTS.filter(a=>activeAgentIds.includes(a.id));
 }
 
@@ -928,8 +924,8 @@ function getToday(){
 // ════════════════════════════════════════════════════════════════
 const FILE_EXPORT_NOTE = " В приложении есть кнопки экспорта: если оформишь ответ как Markdown-таблицу (| Колонка | ... |), пользователь кнопкой «📊 Excel» получит настоящий файл .xlsx; обычный форматированный текст с заголовками (# ## ###) кнопкой «📝 Word» станет файлом .docx. Поэтому НИКОГДА не пиши, что не можешь создать Excel/Word файл — просто сразу давай готовую таблицу/текст в нужном формате. Экспорта в .pptx пока нет — для презентаций давай текстовое содержание по слайдам, которое пользователь сам вставит в PowerPoint.";
 const ALL_AGENTS = [
-  {id:"claude",    name:"Claude",     emoji:"🟠", color:"#d97706", badge:"Sonnet 5", tag:"Глубокий анализ",
-   system:"Ты Claude от Anthropic. Давай аналитические глубокие ответы. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения. Помни историю разговора. Если в сообщении пользователя есть блок АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ИНТЕРНЕТА — используй их как главный источник фактов, они получены из веб-поиска прямо сейчас."+FILE_EXPORT_NOTE},
+  {id:"claude",    name:"GLM-5.3-Flash", emoji:"🟠", color:"#d97706", badge:"Z.ai", tag:"Дёшево + зрение",
+   system:"Ты GLM-5.3-Flash от Zhipu AI (Z.ai). Давай аналитические глубокие ответы. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения. Помни историю разговора. Если в сообщении пользователя есть блок АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ИНТЕРНЕТА — используй их как главный источник фактов, они получены из веб-поиска прямо сейчас."+FILE_EXPORT_NOTE},
   {id:"gemini",    name:"Gemini",     emoji:"🔴", color:"#ea4335", badge:"3.6 Flash", tag:"Быстрые ответы",
    system:"Ты Google Gemini. Анализируй глубоко. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём и процитируй его в ответе. Умеешь точно переводить между любыми языками. Используй дату из контекста. Если есть данные поиска — используй их."+FILE_EXPORT_NOTE},
   {id:"perplexity",name:"Perplexity", emoji:"🟣", color:"#8b5cf6", badge:"Agent API", tag:"Веб-поиск",
@@ -942,17 +938,13 @@ const ALL_AGENTS = [
    system:"Ты GPT-5.6 Luna от OpenAI. Давай практичные пошаговые решения и конкретные рекомендации. Специализируешься на прикладных задачах, инструкциях и советах. Если есть контекст от предыдущих агентов — обогати его практическими советами. Используй дату из контекста."+FILE_EXPORT_NOTE},
 ];
 
-// Код-дуэт: пара агентов для кодовых задач, имитирующая связку Claude+GPT из Abacus AI xHigh,
-// но БЕЗ Claude/GPT — оба стоят денег за токены, а Gemini (бесплатный тариф aistudio.google.com)
-// и DeepSeek (тег "Дешёвый код") вместе дают почти нулевую стоимость за диалог.
-const CODE_DUO_IDS = ["gemini","deepseek"];
-let codeDuoMode = false;
-
-// Claude Fable 5 — премиальная Mythos-модель. НЕ входит в ALL_AGENTS (чтобы не участвовать
-// в параллельном/цепочном режимах по умолчанию — дорого), доступна только через Quick Mode.
+// Fable — раньше был премиальной Claude-моделью уровня Mythos, недоступен для выбора в
+// интерфейсе с 30.07.2026 (был слишком дорог). После замены агента "claude" на GLM-5.3-Flash
+// 02.09.2026 отдельного "тяжёлого" варианта у Z.ai нет — при вызове (если где-то ещё достижимо)
+// использует ту же модель, что и обычный слот, просто чтобы код не падал с ошибкой.
 const FABLE_AGENT = {
-  id:"fable", name:"Claude Fable 5", emoji:"✨", color:"#7c3aed", badge:"Fable 5 · тяжёлый", tag:"Сложные задачи",
-  system:"Ты Claude Fable 5 от Anthropic — топовая модель уровня Mythos для долгих, сложных и многошаговых задач: глубокий анализ, код, стратегия, объёмные документы. Давай максимально тщательные, выверенные ответы, разворачивай рассуждение настолько, насколько того требует сложность задачи. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения."+FILE_EXPORT_NOTE
+  id:"fable", name:"GLM-5.3-Flash", emoji:"✨", color:"#7c3aed", badge:"Fable 5 · тяжёлый", tag:"Сложные задачи",
+  system:"Ты GLM-5.3-Flash от Zhipu AI (Z.ai) — топовая модель для долгих, сложных и многошаговых задач: глубокий анализ, код, стратегия, объёмные документы. Давай максимально тщательные, выверенные ответы, разворачивай рассуждение настолько, насколько того требует сложность задачи. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения."+FILE_EXPORT_NOTE
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -1093,7 +1085,7 @@ var HEALTH_BASE = "Ты — персональный AI Health Manager (Забо
   + "Цель: максимизация Healthspan. Фокус: энергия, биомаркеры, биологический возраст.";
 
 var HEALTH_SYSTEMS = {
-  claude:     HEALTH_BASE + "\n\nТы Claude. Детальный научный анализ с нюансами.",
+  claude:     HEALTH_BASE + "\n\nТы GLM-5.3-Flash. Детальный научный анализ с нюансами.",
   gemini:     HEALTH_BASE + "\n\nТы Gemini. Акцент на последних исследованиях.",
   perplexity: HEALTH_BASE + "\n\nТы Perplexity. Ищи актуальные медицинские источники.",
   deepseek:   HEALTH_BASE + "\n\nТы DeepSeek. Структурированный анализ с таблицами норм."
@@ -2747,14 +2739,7 @@ async function extractClinicalTermsFromLastAnswer(biomarkerNames){
     + "ТЕКСТ ИНТЕРПРЕТАЦИИ:\n" + text.slice(0, 4000);
 
   try{
-    var body = JSON.stringify({ model:"claude-haiku-4-5", max_tokens:300, messages:[{role:"user",content:prompt}] });
-    var data;
-    if(isMobile){
-      data = await proxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, body);
-    } else {
-      data = await directOrProxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, body);
-    }
-    var rtext = (data.content&&data.content[0]&&data.content[0].text)||"{}";
+    var rtext = await callGlmUtility(keys.claude, [{role:"user",content:prompt}], 300);
     rtext = rtext.replace(/```json|```/g,"").trim();
     var s2=rtext.indexOf("{"),e2=rtext.lastIndexOf("}");
     if(s2>-1&&e2>s2) rtext=rtext.slice(s2,e2+1);
@@ -3039,15 +3024,8 @@ async function summarizeOldMessages(oldMessages){
   var prompt = "Сожми этот диалог в краткое резюме (максимум 400 слов на русском), сохранив ВСЕ важные факты, цифры, имена, даты, решения и контекст, который мог понадобиться в продолжении разговора. Не добавляй вступлений типа 'вот резюме' — просто факты по пунктам.\n\nДИАЛОГ:\n" + dialogText;
 
   try{
-    var body = JSON.stringify({ model:"claude-haiku-4-5", max_tokens:600, messages:[{role:"user",content:prompt}] });
-    var data;
-    if(isMobile){
-      data = await proxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, body);
-    } else {
-      data = await directOrProxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, body);
-    }
-    if(data.error) return null;
-    return (data.content && data.content[0] && data.content[0].text) || null;
+    var result = await callGlmUtility(keys.claude, [{role:"user",content:prompt}], 600);
+    return result || null;
   }catch(e){ return null; }
 }
 
@@ -3170,13 +3148,12 @@ async function proxyFetch(url, headers, body, method){
 
 const isMobile = /Android|iPhone|iPad|iPod|Mobile|SamsungBrowser/i.test(navigator.userAgent);
 
-// Единая обёртка для служебных (не-стриминговых) запросов к Anthropic из вспомогательных
-// функций (суммаризация диалога, извлечение фактов, OCR-фолбэк, Vision-парсинг документов и т.п.).
+// Единая обёртка для служебных (не-стриминговых) запросов к внешним API-провайдерам из
+// вспомогательных функций (суммаризация диалога, извлечение фактов, OCR-фолбэк, Vision-парсинг
+// документов и т.п.) — используется, в частности, callGlmUtility() выше.
 // Сначала пробуем прямой fetch из браузера (быстрее), и только если он падает с сетевой ошибкой
-// ("Failed to fetch" — типичная ситуация в РФ без VPN, когда api.anthropic.com заблокирован
-// на уровне провайдера) — откатываемся на прокси-Cloud Function. Без этого отката все эти
-// вспомогательные функции раньше просто падали с "Failed to fetch" на десктопе без VPN,
-// даже когда callClaude() для основного чата уже был этой проблемы починен.
+// ("Failed to fetch" — типичная ситуация в РФ без VPN, когда конкретный домен заблокирован
+// на уровне провайдера) — откатываемся на прокси-Cloud Function.
 async function directOrProxyFetch(url, headers, body){
   try{
     var resp = await fetch(url, {
@@ -3222,127 +3199,79 @@ async function callOpenAI(key, system, history){
   });
 }
 
-// Определяем модель Claude по сложности запроса
+// ЗАМЕНЕНО 02.09.2026: раньше выбирала между claude-sonnet-5/claude-haiku-4-5 по сложности
+// запроса. У GLM-5.3-Flash одна модель на все случаи — функцию оставили (чтобы не трогать
+// вызовы по всему коду), но она теперь просто всегда возвращает единственную модель.
 function pickClaudeModel(history){
-  const last=history[history.length-1];
-  // Тот же фикс, что и в calcTokens — берём ПОСЛЕДНИЙ текстовый блок (реальный вопрос),
-  // а не первый (теперь это подпись картинки при вложенных файлах).
-  const textBlocks=Array.isArray(last?.content)?last.content.filter(c=>c.type==="text"):null;
-  const text=(textBlocks?(textBlocks[textBlocks.length-1]?.text||""):last?.content||"").toLowerCase();
-  const heavy=["слайд","presentation","презентац","подробно","детально","анализ","стратег","бизнес план","эссе","реферат","диплом","промпт","перевед","translate","summarize","сравни","сравнение"];
-  const hasFile=history.some(m=>Array.isArray(m.content)&&m.content.some(c=>c.type==="image"||c.type==="document"));
-  if(hasFile||heavy.some(k=>text.includes(k))||text.length>400) return "claude-sonnet-5";
-  return "claude-haiku-4-5"; // Haiku — для простых быстрых запросов, Sonnet — для сложных/файлов
+  return "glm-5.3-flash";
 }
 
-// Разбирает content-блоки ответа Claude при включённом code_execution tool:
-// текст + запущенный код + вывод (stdout/stderr) собираются в единый читаемый markdown-текст.
-function formatClaudeContentBlocks(content){
-  if(!Array.isArray(content)) return "";
-  let out="";
-  for(const b of content){
-    try{
-      if(b.type==="text"){
-        out+=(b.text||"");
-      } else if(typeof b.type==="string" && b.type.includes("tool_use")){
-        const inp=b.input||{};
-        if(inp.command==="create" && typeof inp.file_text==="string"){
-          // Инструмент code_execution создаёт файл со скриптом перед запуском —
-          // показываем сам код, а не служебную команду "create"
-          out+="\n\n📄 `"+(inp.path||"файл")+"`:\n```\n"+inp.file_text+"\n```\n";
-        } else if(typeof inp.command==="string" && inp.command!=="create" && ["view","str_replace","insert"].includes(inp.command)){
-          // Служебные файловые операции (просмотр/правка) — не несут пользы для показа, пропускаем
-        } else if(typeof inp.command==="string"){
-          out+="\n\n```bash\n"+inp.command+"\n```\n";
-        } else if(typeof inp.code==="string"){
-          out+="\n\n```\n"+inp.code+"\n```\n";
-        }
-        // Иначе — неизвестная служебная команда инструмента, молча пропускаем (не дампим сырой JSON)
-      } else if(typeof b.type==="string" && b.type.includes("tool_result")){
-        const c=b.content;
-        let txt="";
-        if(typeof c==="string") txt=c;
-        else if(Array.isArray(c)){
-          txt=c.map(x=>x.text||x.stdout||x.stderr||"").filter(Boolean).join("\n");
-        } else if(c&&typeof c==="object"){
-          if(c.stdout) txt+=c.stdout;
-          if(c.stderr) txt+=(txt?"\n":"")+"[stderr] "+c.stderr;
-          if(!txt&&c.error_code) txt="[ошибка выполнения кода: "+c.error_code+"]";
-          // Если это просто служебное подтверждение файловой операции (нет stdout/stderr/ошибки) —
-          // молча пропускаем, а не дампим сырой JSON вида {"type":"...create_result",...} в чат
-        }
-        if(txt) out+="\n```\n"+txt.trim()+"\n```\n";
-      }
-    }catch(_){}
-  }
-  // Подстраховка: если служебный JSON инструмента (вида {"type":"...execution...result",...})
-  // всё же просочился прямо внутрь текстового блока (а не пришёл отдельным tool_result блоком,
-  // который мы уже фильтруем выше) — вырезаем его регуляркой, чтобы он точно не долетел до чата.
-  out = out.replace(/```\s*\n?\{"type":"[a-z_]*(?:execution|tool)[a-z_]*"[^`]*?\}\s*\n?```/gi, "")
-           .replace(/\{"type":"[a-z_]*(?:execution|tool)[a-z_]*"\s*,\s*"is_file_update":\s*(?:true|false)\}/gi, "");
-  return out.trim();
+// formatClaudeContentBlocks() удалена 02.09.2026 — использовалась только веткой code_execution
+// в старом callClaude(), которую убрали вместе с кнопкой 🖥️ (см. комментарий там же).
+
+// Переводит контент-блоки, собранные в стиле Claude (type:"image", source:{type:"base64",...}),
+// в формат OpenAI-совместимого API (type:"image_url", data URL) — так вызывающему коду по всему
+// хабу не нужно ничего менять, конвертация происходит прямо здесь.
+function convertClaudeBlocksToOpenAIStyle(content){
+  if(!Array.isArray(content)) return content;
+  return content.map(function(b){
+    if(b.type==="image" && b.source && b.source.type==="base64"){
+      return {type:"image_url", image_url:{url:"data:"+b.source.media_type+";base64,"+b.source.data}};
+    }
+    return b;
+  });
+}
+
+// ЗАМЕНЕНО 02.09.2026: раньше здесь была Claude (Anthropic) — переключили на GLM-5.3-Flash
+// (Zhipu AI / Z.ai) ради цены: $0.075/$0.25 за млн токенов на промо-тарифе (список $0.15/$0.50
+// после 09.09.2026) против заметно более дорогого Claude Sonnet. Название функции и id агента
+// ("claude") оставлены как есть — их использует весь остальной код хаба (диспетчер, visionSet
+// и т.д.), переименовывать по всему файлу не было смысла.
+//
+// GLM всегда что-то "думает" перед ответом и это не отключается полностью — по умолчанию стоит
+// reasoning_effort:"max", что даёт до 35× больше токенов-размышлений на простых вопросах, чем
+// "low". Явно ставим "low" ниже, чтобы не переплачивать на обычных вопросах.
+//
+// Функция 🖥️ "Выполнение кода" (серверная песочница) была уникальной фичей именно Anthropic API —
+// у GLM через этот тип API такого инструмента нет, поэтому useCodeExec больше ни на что не влияет.
+// Общий помощник для РАЗОВЫХ служебных вызовов GLM-5.3-Flash — не через основной диспетчер
+// агентов, а из вспомогательных функций хаба (извлечение фактов, суммаризация старой истории,
+// OCR анализов, поиск координат пропуска в fillPdfFromAnswer и т.п.). Раньше каждая такая функция
+// дублировала один и тот же прямой вызов Claude — теперь общий код в одном месте. Замена 02.09.2026.
+async function callGlmUtility(apiKey, messages, maxTokens){
+  const body = JSON.stringify({model:"glm-5.3-flash", max_tokens:maxTokens, reasoning_effort:"low", messages});
+  const GLM_URL = "https://api.z.ai/api/paas/v4/chat/completions";
+  const headers = {"Authorization":"Bearer "+apiKey};
+  const data = isMobile
+    ? await proxyFetch(GLM_URL, headers, body)
+    : await directOrProxyFetch(GLM_URL, headers, body);
+  if(data.error) throw new Error(data.error.message||JSON.stringify(data.error));
+  return (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
 }
 
 async function callClaude(key, system, history, onChunk, forceModel){
   return callWithRetry(async()=>{
     const model=forceModel||pickClaudeModel(history);
-    const useCodeExec = typeof codeExecEnabled!=="undefined" && codeExecEnabled;
-    // При включённом code_execution в тот же max_tokens бюджет упаковывается не только текст
-    // ответа, но и сам код, служебные блоки вызова инструмента и вывод выполнения — обычной
-    // логики calcTokens() (1500-8000 для чата) на это часто не хватает, ответ обрывался
-    // на полуслове. Даём отдельный, заведомо щедрый бюджет именно для этого режима.
-    // Подняли ещё раз 29.07.2026: при код-ревью больших файлов (десятки КБ) Fable иногда
-    // цитирует/переносит содержимое файла целиком внутрь bash-скрипта в песочнице — это само
-    // по себе съедает солидный кусок бюджета вывода, и 12000 токенов стало не хватать, ответ
-    // обрывался на середине файла ещё до того, как модель успевала закончить анализ.
-    const maxTok = useCodeExec ? 24000 : calcTokens(history);
-    const bodyObj={model,max_tokens:maxTok,system,messages:history,stream:!isMobile&&!useCodeExec};
-    if(useCodeExec) bodyObj.tools=[{type:"code_execution_20250825",name:"code_execution"}];
+    const openaiMessages=[
+      {role:"system",content:system},
+      ...history.map(function(m){ return {role:m.role, content:convertClaudeBlocksToOpenAIStyle(m.content)}; })
+    ];
+    const bodyObj={model,max_tokens:calcTokens(history),reasoning_effort:"low",messages:openaiMessages,stream:!isMobile};
     const body=JSON.stringify(bodyObj);
-    if(isMobile||useCodeExec){
-      // Мобильный ИЛИ включено выполнение кода — без стриминга через прокси
-      // (при code execution ответ содержит несколько типов блоков — их проще разобрать целиком,
-      // чем на лету парсить из SSE-потока)
-      const proxyHeaders={"x-api-key":key,"anthropic-version":"2023-06-01"};
-      if(!useCodeExec){
-        const d=await proxyFetch("https://api.anthropic.com/v1/messages",proxyHeaders,{...bodyObj,stream:false});
-        if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
-        return d.content.map(b=>b.text||"").join("").trim();
-      }
-      proxyHeaders["anthropic-beta"]="code-execution-2025-08-25";
-      // Задачи с несколькими шагами кода (написать → запустить → проанализировать вывод,
-      // особенно с несколькими тест-кейсами) Anthropic иногда прерывает с stop_reason:"pause_turn" —
-      // это означает "продолжи, отправив мой же ответ обратно", а не финальный ответ. Раньше хаб
-      // брал только первый кусок как есть — если пауза случалась ДО того как модель написала
-      // текстовое резюме, видимый ответ получался пустым. Теперь дозапрашиваем, пока не дойдём
-      // до настоящего конца хода (максимум 6 шагов, чтобы не уйти в бесконечный цикл).
-      let allBlocks=[], runMessages=history, containerId=null, d=null;
-      for(let step=0; step<6; step++){
-        const stepBody={...bodyObj, messages:runMessages, stream:false};
-        if(containerId) stepBody.container=containerId;
-        d=await proxyFetch("https://api.anthropic.com/v1/messages",proxyHeaders,stepBody);
-        if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
-        allBlocks=allBlocks.concat(d.content||[]);
-        if(typeof d.container==="string") containerId=d.container;
-        else if(d.container&&d.container.id) containerId=d.container.id;
-        if(d.stop_reason!=="pause_turn") break;
-        runMessages=[...runMessages, {role:"assistant", content:d.content}];
-      }
-      const formatted = formatClaudeContentBlocks(allBlocks);
-      return formatted || "⚠️ Claude выполнил код, но не оставил текстового ответа (или задача не уложилась в лимит шагов). Попробуй разбить вопрос на более простые части.";
-    }
+    const GLM_URL="https://api.z.ai/api/paas/v4/chat/completions";
     const bodySize=body.length;
-    const claudeTimeout=bodySize>100000?180000:bodySize>30000?120000:60000;
+    const glmTimeout=bodySize>100000?180000:bodySize>30000?120000:60000;
     try{
-      const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),claudeTimeout);
-      const r=await fetch("https://api.anthropic.com/v1/messages",{
+      if(isMobile) throw new Error("__use_proxy__"); // на мобиле сразу через прокси, без стриминга
+      const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),glmTimeout);
+      const r=await fetch(GLM_URL,{
         method:"POST",signal:ctrl.signal,
-        headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},
         body
       });
       clearTimeout(t);
       if(!r.ok){ const e=await r.json(); throw new Error(e.error?.message||r.statusText); }
-      // SSE стриминг
+      // SSE стриминг (формат OpenAI: choices[0].delta.content)
       const reader=r.body.getReader(); const dec=new TextDecoder(); let full="";
       while(true){
         const {done,value}=await reader.read(); if(done) break;
@@ -3353,31 +3282,28 @@ async function callClaude(key, system, history, onChunk, forceModel){
           if(data==="[DONE]"||!data) continue;
           try{
             const j=JSON.parse(data);
-            const delta=j.delta?.text||(j.type==="content_block_delta"?j.delta?.text:"") || "";
+            const delta=j.choices&&j.choices[0]&&j.choices[0].delta&&j.choices[0].delta.content || "";
             if(delta){ full+=delta; if(onChunk) onChunk(full); }
-            else if(j.type==="message_start"&&onChunk&&!full) onChunk("⏳");
           }catch(_){}
         }
       }
-      // Если стриминг вернул пустую строку — fallback без стриминга
       if(!full.trim()){
-        const r2=await fetch("https://api.anthropic.com/v1/messages",{
+        const r2=await fetch(GLM_URL,{
           method:"POST",
-          headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+          headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},
           body:JSON.stringify({...bodyObj,stream:false})
         });
         if(!r2.ok){ const e=await r2.json(); throw new Error(e.error?.message||r2.statusText); }
         const d2=await r2.json();
-        return (d2.content||[]).map(b=>b.text||"").join("").trim();
+        return (d2.choices&&d2.choices[0]&&d2.choices[0].message&&d2.choices[0].message.content||"").trim();
       }
       return full.trim();
     }catch(directErr){
-      // "Failed to fetch" здесь значит, что прямое соединение с api.anthropic.com
-      // заблокировано на уровне сети/провайдера (частая ситуация в РФ без VPN) — повторять
-      // тот же прямой запрос бессмысленно. Откатываемся на прокси (без стриминга, но доходит).
-      const d=await proxyFetch("https://api.anthropic.com/v1/messages",{"x-api-key":key,"anthropic-version":"2023-06-01"},{...bodyObj,stream:false});
+      // "Failed to fetch"/мобильный режим — прямое соединение с api.z.ai заблокировано или его
+      // избегаем на мобиле. Откатываемся на прокси (без стриминга, но доходит).
+      const d=await proxyFetch(GLM_URL,{"Authorization":"Bearer "+key},{...bodyObj,stream:false});
       if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
-      return (d.content||[]).map(b=>b.text||"").join("").trim();
+      return (d.choices&&d.choices[0]&&d.choices[0].message&&d.choices[0].message.content||"").trim();
     }
   });
 }
@@ -3737,8 +3663,8 @@ async function callAgent(agent, system, history, onChunk){
   const memCtx = getUserMemoryContext();
   if(memCtx) effectiveSystem = memCtx + "\n\n" + effectiveSystem;
   switch(agent.id){
-    case "claude":     return keys.claude?callClaude(keys.claude,effectiveSystem,history,onChunk):Promise.reject(new Error("Добавь ключ Claude в ⚙️ Настройки → console.anthropic.com"));
-    case "fable":      return keys.claude?callClaude(keys.claude,effectiveSystem,history,onChunk,"claude-fable-5"):Promise.reject(new Error("Добавь ключ Claude в ⚙️ Настройки → console.anthropic.com"));
+    case "claude":     return keys.claude?callClaude(keys.claude,effectiveSystem,history,onChunk):Promise.reject(new Error("Добавь ключ GLM-5.3-Flash в ⚙️ Настройки → z.ai"));
+    case "fable":      return keys.claude?callClaude(keys.claude,effectiveSystem,history,onChunk,"glm-5.3-flash"):Promise.reject(new Error("Добавь ключ GLM-5.3-Flash в ⚙️ Настройки → z.ai"));
     case "gemini":     return keys.gemini?callGemini(keys.gemini,effectiveSystem,history):Promise.reject(new Error("Добавь ключ Gemini в ⚙️ Настройки → aistudio.google.com (бесплатно)"));
     case "perplexity": return keys.perplexity?callPerplexity(keys.perplexity,effectiveSystem,history):Promise.reject(new Error("Добавь ключ Perplexity в ⚙️ Настройки → perplexity.ai/settings/api"));
     case "deepseek":   return keys.deepseek?callDeepSeek(keys.deepseek,effectiveSystem,history,onChunk):Promise.reject(new Error("Добавь ключ DeepSeek в ⚙️ Настройки → platform.deepseek.com"));
@@ -3752,7 +3678,7 @@ async function synthesize(system, history){
   if(keys.deepseek) return callDeepSeek(keys.deepseek,system,history);
   if(keys.claude) return callClaude(keys.claude,system,history);
   if(keys.gemini) return callGemini(keys.gemini,system,history);
-  throw new Error("Для синтеза нужен ключ DeepSeek или Claude в ⚙️ Настройки");
+  throw new Error("Для синтеза нужен ключ DeepSeek или GLM-5.3-Flash в ⚙️ Настройки");
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -3762,23 +3688,26 @@ async function synthesize(system, history){
 // Используется для страниц без текстового слоя — даёт заметно более качественный результат,
 // чем Tesseract OCR, особенно на стилизованном дизайне (карточки, цветные фоны, нестандартные шрифты),
 // и, что важно, превращает картинку в обычный текст, который сохраняется в истории чата.
+// ЗАМЕНЕНО 02.09.2026: раньше здесь была фиксированная claude-haiku-4-5. Теперь использует тот
+// же ключ/модель, что и основной агент (GLM-5.3-Flash) — она тоже умеет в зрение и заметно дешевле.
 async function transcribePageWithVision(apiKey, b64, mimeType){
   try{
     var body=JSON.stringify({
-      model:"claude-haiku-4-5", max_tokens:1500,
+      model:"glm-5.3-flash", max_tokens:1500, reasoning_effort:"low",
       messages:[{role:"user",content:[
-        {type:"image",source:{type:"base64",media_type:mimeType,data:b64}},
+        {type:"image_url",image_url:{url:"data:"+mimeType+";base64,"+b64}},
         {type:"text",text:"На этом изображении — страница документа без текстового слоя (дизайнерская карточка, скан или презентация). Прочитай ВЕСЬ видимый текст максимально точно и полно: заголовки, основной текст, подписи. Если на странице несколько отдельных карточек/блоков — раздели их явно (например, по номеру или заголовку каждой карточки). Верни только сам текст, без вступлений и пояснений."}
       ]}]
     });
     var data;
+    var GLM_URL="https://api.z.ai/api/paas/v4/chat/completions";
     if(isMobile){
-      data=await proxyFetch("https://api.anthropic.com/v1/messages",{"x-api-key":apiKey,"anthropic-version":"2023-06-01"},body);
+      data=await proxyFetch(GLM_URL,{"Authorization":"Bearer "+apiKey},body);
     } else {
-      data=await directOrProxyFetch("https://api.anthropic.com/v1/messages",{"x-api-key":apiKey,"anthropic-version":"2023-06-01"},body);
+      data=await directOrProxyFetch(GLM_URL,{"Authorization":"Bearer "+apiKey},body);
     }
     if(data.error) return null;
-    var txt=(data.content||[]).map(function(b){return b.text||"";}).join("").trim();
+    var txt=(data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content||"").trim();
     return txt||null;
   }catch(e){ return null; }
 }
@@ -4289,7 +4218,7 @@ function handleHealthVaultUpload(files){
             var b64 = compressed.split(",")[1]||"";
             var mime = "image/jpeg";
             var sEl = document.getElementById(cardId+"_status");
-            if(sEl) sEl.textContent = "🤖 Claude Vision извлекает показатели...";
+            if(sEl) sEl.textContent = "🤖 GLM Vision извлекает показатели...";
             extractFromImageWithVision(claudeKey, file.name, b64, mime, medType.type, cardId);
           }).catch(function(){
             var b64 = dataUrl.split(",")[1]||"";
@@ -4297,7 +4226,7 @@ function handleHealthVaultUpload(files){
           });
         } else {
           var s=document.getElementById(cardId+"_status");
-          if(s) s.innerHTML="<span style='color:#f59e0b'>⚠️ Нужен ключ Claude для распознавания изображений</span>";
+          if(s) s.innerHTML="<span style='color:#f59e0b'>⚠️ Нужен ключ GLM-5.3-Flash для распознавания изображений</span>";
         }
         return;
       }
@@ -4382,10 +4311,8 @@ function repairTruncatedMarkersJSON(txt){
 async function extractFromImageWithVision(apiKey, filename, b64, mimeType, docType, cardId){
   var statusEl = document.getElementById(cardId+"_status");
   try{
-    var visionBody = JSON.stringify({
-      model:"claude-sonnet-5", max_tokens:6144,
-      messages:[{role:"user",content:[
-        {type:"image",source:{type:"base64",media_type:mimeType,data:b64}},
+    var visionMessages=[{role:"user",content:[
+        {type:"image_url",image_url:{url:"data:"+mimeType+";base64,"+b64}},
         {type:"text",text:"Посмотри на изображение медицинского документа и извлеки данные.\n\n"
           +"Верни ТОЛЬКО JSON объект (не массив!) в формате:\n"
           +'{"date":"ГГГГ-ММ-ДД общая дата документа или null","narrative":"текст заключения или null","markers":[{"name":"...","value":число_или_null,"qualitative":"текст или null","unit":"...","norm":"текст нормы точно как в документе, или null","date":"ГГГГ-ММ-ДД или null"}]}\n\n'
@@ -4413,17 +4340,8 @@ async function extractFromImageWithVision(apiKey, filename, b64, mimeType, docTy
           +"- Ищи дату исследования/забора анализа ГДЕ УГОДНО на изображении, в любом формате (включая 'дата:', 'дата исследования:', заголовки типа 'ЭКГ в покое 08.06.2026 09:15', номера направлений с датой рядом) и переведи в ГГГГ-ММ-ДД.\n"
           +"- ЗАПРЕЩЕНО подставлять сегодняшнюю дату. Если дата не найдена нигде на изображении даже после тщательного поиска во всех ориентациях — верни null. Угадывать дату НЕЛЬЗЯ.\n\n"
           +"Верни ТОЛЬКО JSON объект, без пояснений и без markdown-разметки."}
-      ]}]
-    });
-    var visionHeaders = {"x-api-key":apiKey,"anthropic-version":"2023-06-01"};
-    var data;
-    if(isMobile){
-      data = await proxyFetch("https://api.anthropic.com/v1/messages", visionHeaders, visionBody);
-    } else {
-      data = await directOrProxyFetch("https://api.anthropic.com/v1/messages", visionHeaders, visionBody);
-    }
-    if(data.error) throw new Error(data.error.message);
-    var txt = (data.content||[]).map(function(b){return b.text||"";}).join("").trim().replace(/```json|```/g,"").trim();
+      ]}];
+    var txt = (await callGlmUtility(apiKey, visionMessages, 6144)).trim().replace(/```json|```/g,"").trim();
     var s2=txt.indexOf("{"),e2=txt.lastIndexOf("}");
     if(s2>-1&&e2>s2) txt=txt.slice(s2,e2+1);
     var result;
@@ -4589,7 +4507,7 @@ function processVaultFile(filename, text, claudeKey){
     extractBiomarkersWithAI(claudeKey, filename, text, medType.type, cardId);
   } else if(!claudeKey){
     var statusEl = document.getElementById(cardId+"_status");
-    if(statusEl) statusEl.innerHTML = "<span style='color:#f59e0b'>⚠️ Добавь ключ Claude в настройках для автоизвлечения</span>";
+    if(statusEl) statusEl.innerHTML = "<span style='color:#f59e0b'>⚠️ Добавь ключ GLM-5.3-Flash в настройках для автоизвлечения</span>";
   } else {
     var statusEl = document.getElementById(cardId+"_status");
     if(statusEl) statusEl.innerHTML = "<span style='color:#6b7280'>📄 Сохранён. Текст не распознан — попробуй PDF с текстом.</span>";
@@ -4742,17 +4660,7 @@ async function extractBiomarkersWithAI(apiKey, filename, text, docType, cardId){
       + "- НЕ включай референсные значения, только фактические результаты пациента\n\n"
       + "Текст анализа:\n" + text.slice(0, 6000);
 
-    var extractBody = JSON.stringify({model:"claude-haiku-4-5",max_tokens:1000,messages:[{role:"user",content:prompt}]});
-    var extractHeaders = {"x-api-key":apiKey,"anthropic-version":"2023-06-01"};
-    var data;
-    if(isMobile){
-      data = await proxyFetch("https://api.anthropic.com/v1/messages", extractHeaders, extractBody);
-    } else {
-      data = await directOrProxyFetch("https://api.anthropic.com/v1/messages", extractHeaders, extractBody);
-    }
-    if(data.error) throw new Error(data.error.message);
-
-    var resultText = (data.content||[]).map(function(b){return b.text||"";}).join("").trim();
+    var resultText = (await callGlmUtility(apiKey, [{role:"user",content:prompt}], 1000)).trim();
     // Чистим JSON — убираем markdown и всё до первой [
     resultText = resultText.replace(/```json|```/g,"").trim();
     var arrStart = resultText.indexOf("[");
@@ -4792,16 +4700,13 @@ function renderFilePreview(){
     : "";
   // Предупреждение о DeepSeek: он не умеет видеть изображения (только текст, см. callDeepSeek).
   // Если сейчас реально может ответить ИМЕННО и ТОЛЬКО DeepSeek (Быстрый режим с ним выбранным),
-  // предупреждаем заранее, а не постфактум, когда придёт выдуманный ответ. В Код-дуэте DeepSeek —
-  // не единственный агент (Gemini картинку видит), так что там предупреждение мягче.
+  // предупреждаем заранее, а не постфактум, когда придёт выдуманный ответ.
   const hasImages=currentFiles.some(f=>f.type.startsWith("image/")||f.type==="application/pdf");
   let visionWarning="";
   if(hasImages){
     const quickSel=document.getElementById("quickAgent");
     if(quickMode && quickSel && quickSel.value==="deepseek"){
       visionWarning="<div style='font-size:11px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 8px'>⚠️ DeepSeek не видит изображения/чертежи — только извлечённый текст. Для этого файла выбери другого агента.</div>";
-    } else if(codeDuoMode){
-      visionWarning="<div style='font-size:11px;color:#0e7490;background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;padding:6px 8px'>ℹ️ В код-дуэте картинку/чертёж реально увидит только Gemini — DeepSeek работает по тексту.</div>";
     }
   }
   p.innerHTML=rows+clearAll+visionWarning;
@@ -4859,27 +4764,7 @@ function populateQuickAgentSelect(){
   if(prev && [...sel.options].some(o=>o.value===prev)) sel.value = prev;
 }
 
-// Код-дуэт — ограничивает Параллельный/Цепочный режимы только Gemini+DeepSeek (см. CODE_DUO_IDS),
-// не трогая обычный набор активных агентов (activeAgentIds) из ⚙️ Настроек — просто временно
-// подменяет то, что возвращает getAgents(), пока режим включён.
-function toggleCodeDuoMode(){
-  codeDuoMode = !codeDuoMode;
-  const bar = document.getElementById("codeDuoBar");
-  const btn = document.getElementById("codeDuoBtn");
-  if(bar) bar.style.display = codeDuoMode ? "flex" : "none";
-  if(btn){
-    btn.style.background = codeDuoMode ? "#a5f3fc" : "#f1f5f9";
-    btn.style.color = codeDuoMode ? "#0e7490" : "#475569";
-    btn.style.borderColor = codeDuoMode ? "#67e8f9" : "#e2e8f0";
-  }
-  if(codeDuoMode){
-    if(quickMode) populateQuickAgentSelect(); // если открыт и Быстрый режим — обновить список под дуэт
-    showToast("👨‍💻 Код-дуэт включён: Gemini + DeepSeek (бесплатно/дёшево)");
-  } else {
-    if(quickMode) populateQuickAgentSelect();
-    showToast("👨‍💻 Код-дуэт выключен — снова все активные агенты");
-  }
-}
+// toggleCodeDuoMode() убрана 02.09.2026 вместе с кнопкой/плашкой — см. ai-hub.md для истории.
 
 function toggleChainMode(){
   chainMode = !chainMode;
@@ -4893,20 +4778,11 @@ function toggleChainMode(){
     const qb = document.getElementById("quickBtn");
     if(qb){ qb.style.background="#f1f5f9"; qb.style.color="#475569"; qb.style.borderColor="#e2e8f0"; }
   }
-  showToast(chainMode ? "🔗 Цепочка включена: Perplexity→Gemini→Kimi→GPT→Claude→DeepSeek" : "🔗 Цепочка выключена");
+  showToast(chainMode ? "🔗 Цепочка включена: Perplexity→Gemini→Kimi→GPT→GLM→DeepSeek" : "🔗 Цепочка выключена");
 }
 
 
-function toggleCodeExec(){
-  codeExecEnabled = !codeExecEnabled;
-  const btn = document.getElementById("codeExecBtn");
-  if(btn){
-    btn.style.background = codeExecEnabled ? "#0f172a" : "#f1f5f9";
-    btn.style.color = codeExecEnabled ? "#60a5fa" : "#475569";
-    btn.style.borderColor = codeExecEnabled ? "#1e3a5f" : "#e2e8f0";
-  }
-  showToast(codeExecEnabled ? "🖥️ Выполнение кода включено — работает только с Claude" : "🖥️ Выполнение кода выключено");
-}
+// toggleCodeExec() убрана 02.09.2026 вместе с кнопкой — см. комментарий у места её вызова в HTML.
 
 
 function toggleSearch(){
@@ -4985,7 +4861,7 @@ async function sendQuick(text, inp){
     }
     // DeepSeek не поддерживает изображения — только текст/OCR
     else if(agentId==="deepseek"){
-      showToast("⚠️ DeepSeek не умеет распознавать изображения — переключись на Claude/Gemini/GPT/Perplexity/Kimi, если нужно прочитать фото");
+      showToast("⚠️ DeepSeek не умеет распознавать изображения — переключись на GLM/Gemini/GPT/Perplexity/Kimi, если нужно прочитать фото");
     }
   }
 
@@ -6155,7 +6031,7 @@ async function callByAgentId(agentId, system, history){
   try{
     switch(agentId){
       case "claude":     return keys.claude?await callClaude(keys.claude,system,history):null;
-      case "fable":      return keys.claude?await callClaude(keys.claude,system,history,null,"claude-fable-5"):null;
+      case "fable":      return keys.claude?await callClaude(keys.claude,system,history,null,"glm-5.3-flash"):null;
       case "gemini":     return keys.gemini?await callGemini(keys.gemini,system,history):null;
       case "perplexity": return keys.perplexity?await callPerplexity(keys.perplexity,system,history):null;
       case "deepseek":   return keys.deepseek?await callDeepSeek(keys.deepseek,system,history):null;
@@ -6633,7 +6509,7 @@ async function fillPdfFromAnswer(turnId){
   }
   if(!pdfFile && !imgFile){ showToast("❌ Загрузи PDF или изображение задания"); return; }
 
-  showToast("⏳ Claude анализирует пропуски...");
+  showToast("⏳ GLM анализирует пропуски...");
 
   // 2. Конвертируем в base64 изображение
   let imgB64 = "", imgType = "image/jpeg";
@@ -6655,9 +6531,9 @@ async function fillPdfFromAnswer(turnId){
   }
   if(!imgB64){ showToast("❌ Не удалось получить изображение"); return; }
 
-  // 3. Спрашиваем Claude где пропуски и какие ответы
+  // 3. Спрашиваем GLM где пропуски и какие ответы
   const keys = getKeys();
-  if(!keys.claude){ showToast("❌ Нужен ключ Claude"); return; }
+  if(!keys.claude){ showToast("❌ Нужен ключ GLM-5.3-Flash"); return; }
 
   const prompt = `Проанализируй это учебное задание с пропусками (___).
 Найди все пропуски и верные ответы для них.
@@ -6668,17 +6544,10 @@ async function fillPdfFromAnswer(turnId){
 
   let coordData;
   try{
-    const body = JSON.stringify({
-      model:"claude-sonnet-4-6",
-      max_tokens:2000,
-      messages:[{role:"user",content:[
-        {type:"image",source:{type:"base64",media_type:imgType,data:imgB64}},
+    const raw = await callGlmUtility(keys.claude, [{role:"user",content:[
+        {type:"image_url",image_url:{url:"data:"+imgType+";base64,"+imgB64}},
         {type:"text",text:prompt}
-      ]}]
-    });
-    // Всегда через прокси — прямой fetch Claude заблокирован CORS
-    const resp = await proxyFetch("https://api.anthropic.com/v1/messages",{"x-api-key":keys.claude,"anthropic-version":"2023-06-01"},body);
-    const raw = resp.content?.[0]?.text||"";
+      ]}], 2000);
     const clean = raw.replace(/```json|```/g,"").trim();
     const start = clean.indexOf("{");
     const end = clean.lastIndexOf("}");
@@ -7410,7 +7279,7 @@ if(document.readyState==="loading"){
         <div style="text-align:center;color:#cbd5e1;font-size:13px;padding:24px">Нет сохранённых фактов</div>
       </div>
       <div style="margin-top:14px;padding:10px;background:#f8fafc;border-radius:8px;font-size:11px;color:#94a3b8">
-        💡 Claude Haiku автоматически извлекает факты о тебе из диалогов. Ненужные можно удалить.
+        💡 GLM-5.3-Flash автоматически извлекает факты о тебе из диалогов. Ненужные можно удалить.
       </div>
     </div>
     <!-- Preview -->
@@ -7741,14 +7610,7 @@ async function extractFactsFromDialog(messages){
     + "\n\nДИАЛОГ:\n" + dialogText;
 
   try{
-    var extractBody = JSON.stringify({ model:"claude-haiku-4-5", max_tokens:300, messages:[{role:"user",content:prompt}] });
-    var data;
-    if(isMobile){
-      data = await proxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, extractBody);
-    } else {
-      data = await directOrProxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, extractBody);
-    }
-    var text = (data.content&&data.content[0]&&data.content[0].text)||"[]";
+    var text = (await callGlmUtility(keys.claude, [{role:"user",content:prompt}], 300)) || "[]";
     text = text.replace(/```json|```/g,"").trim();
     var newFacts = JSON.parse(text);
     if(!Array.isArray(newFacts) || !newFacts.length) return;
@@ -7793,7 +7655,7 @@ async function extractFactsNow(){
   if(btn){ btn.textContent = "🔍 Извлечь сейчас"; btn.disabled = false; }
 }
 
-// Разовая семантическая дедупликация уже сохранённых фактов через Claude Haiku.
+// Разовая семантическая дедупликация уже сохранённых фактов через GLM-5.3-Flash.
 // Нужна для очистки фактов, накопленных до того, как извлечение стало
 // учитывать существующий список (см. extractFactsFromDialog) — например,
 // "Ищет дешёвые авиабилеты" и "Интересуется поиском дешёвых авиабилетов".
@@ -7801,7 +7663,7 @@ async function dedupFactsNow(){
   var facts = window.userMemory.facts || [];
   if(facts.length < 2){ showToast("Недостаточно фактов для очистки"); return; }
   var keys = getKeys ? getKeys() : {};
-  if(!keys.claude){ showToast("⚠️ Нужен ключ Claude в ⚙️ Настройки"); return; }
+  if(!keys.claude){ showToast("⚠️ Нужен ключ GLM-5.3-Flash в ⚙️ Настройки"); return; }
   var btn = document.getElementById("dedupBtn");
   if(btn){ btn.textContent = "⏳ Чищу..."; btn.disabled = true; }
   try{
@@ -7812,14 +7674,7 @@ async function dedupFactsNow(){
       + "Не объединяй факты, которые лишь похожи по теме, но несут разную информацию.\n"
       + "Верни ТОЛЬКО JSON массив строк — итоговый список фактов без дублей, без пояснений.\n\n"
       + "СПИСОК ФАКТОВ:\n" + numbered;
-    var body = JSON.stringify({ model:"claude-haiku-4-5", max_tokens:600, messages:[{role:"user",content:prompt}] });
-    var data;
-    if(isMobile){
-      data = await proxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, body);
-    } else {
-      data = await directOrProxyFetch("https://api.anthropic.com/v1/messages", {"x-api-key":keys.claude,"anthropic-version":"2023-06-01"}, body);
-    }
-    var text = (data.content&&data.content[0]&&data.content[0].text)||"[]";
+    var text = (await callGlmUtility(keys.claude, [{role:"user",content:prompt}], 600)) || "[]";
     text = text.replace(/```json|```/g,"").trim();
     var cleaned = JSON.parse(text);
     if(!Array.isArray(cleaned) || !cleaned.length){ showToast("⚠️ Не удалось очистить"); }
