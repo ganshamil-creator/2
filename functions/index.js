@@ -45,7 +45,7 @@ function setCors(res) {
 // 1) PROXY — исходящий прокси к AI-провайдерам
 // ════════════════════════════════════════════════════════════════
 const ALLOWED_HOSTS = [
-  "api.anthropic.com",
+  "api.anthropic.com", // оставлен на всякий случай, хотя основной агент 02.09.2026 переехал на GLM
   "api.openai.com",
   "generativelanguage.googleapis.com",
   "api.perplexity.ai",
@@ -54,7 +54,8 @@ const ALLOWED_HOSTS = [
   "api.kimi.ai",
   "api.kimi.com",
   "api.deepseek.com",
-  "public-api.gamma.app" // добавлено 10.08.2026 — генерация презентаций через Gamma API
+  "public-api.gamma.app", // добавлено 10.08.2026 — генерация презентаций через Gamma API
+  "api.z.ai" // добавлено 02.09.2026 — GLM-5.3-Flash (Zhipu AI) заменил Claude как основной агент
 ];
 
 exports.proxy = onRequest(
