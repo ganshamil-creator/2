@@ -169,8 +169,15 @@
       // Сохранить все чаты в облако
       async saveChats(chats){
         try{
-          // Сохраняем каждый чат отдельным документом
-          for(const chat of chats){
+          // ЗАЩИТА ОТ ВОСКРЕШЕНИЯ (добавлено 02.09.2026): раньше эта функция писала документ
+          // для КАЖДОГО переданного чата безусловно. Если чат был удалён на другом устройстве/
+          // вкладке (записан tombstone), а ТЕКУЩАЯ вкладка ещё не подхватила это удаление —
+          // её собственный автосейв (см. setInterval каждые 60с) продолжал слать этот чат сюда
+          // и молча пересоздавал документ в Firestore, обходя tombstone стороной. Теперь перед
+          // записью явно вычитаем список удалённых ID и пропускаем их.
+          const deletedIds = new Set(await this.getDeletedIds());
+          const toSave = chats.filter(c=>!deletedIds.has(c.id));
+          for(const chat of toSave){
             const chatRef = doc(db, "users", userId, "chats", chat.id);
             // Не сохраняем base64 файлы в облако (слишком большие)
             const chatToSave = {
@@ -183,7 +190,7 @@
             };
             await setDoc(chatRef, {data: JSON.stringify(chatToSave), updatedAt: Date.now()});
           }
-          console.log("☁️ Сохранено в облако:", chats.length, "тем");
+          console.log("☁️ Сохранено в облако:", toSave.length, "тем"+(chats.length>toSave.length?" ("+(chats.length-toSave.length)+" пропущено как удалённые)":""));
         }catch(e){ console.error("Cloud save error:", e); }
       },
 
@@ -218,8 +225,13 @@
           const existing = await getDoc(tombRef);
           const ids = existing.exists() ? (existing.data().ids||[]) : [];
           if(!ids.includes(chatId)) ids.push(chatId);
-          // Храним последние 200 удалённых ID
-          const trimmed = ids.slice(-200);
+          // Раньше хранили последние 200 удалённых ID — при активном использовании этого было
+          // мало: после 200+ новых удалений самые старые tombstone-записи вытеснялись, и если
+          // где-то (например, в другой вкладке с устаревшим состоянием) документ той темы успел
+          // воскреснуть — она снова "оживала" у всех, без всякого нового удаления с твоей стороны.
+          // ID чата — короткая строка (~20-25 символов), так что даже 5000 записей — это разумные
+          // ~100-125КБ, далеко от лимита Firestore на документ (1МБ). Увеличено 02.09.2026.
+          const trimmed = ids.slice(-5000);
           await setDoc(tombRef, {ids: trimmed, updatedAt: Date.now()});
         }catch(e){ console.error("deleteChat error:", e); }
       },
