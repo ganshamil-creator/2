@@ -422,12 +422,27 @@
   <script src="vendor/docx.umd.js"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    body{background:#f8fafc;color:#1e293b;font-family:'Segoe UI',system-ui,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+    body{background:#f8fafc;color:#1e293b;font-family:'Segoe UI',system-ui,sans-serif;height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
     ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:2px}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}.pulse{animation:pulse 1.2s infinite}
     @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}.fade{animation:fadeIn .3s ease}
     button{cursor:pointer}input,textarea{outline:none;font-family:inherit}
     @media(max-width:768px){#inputArea{position:sticky;bottom:0;z-index:50}#messages{padding-bottom:10px}}
+    /* Добавлено 03.09.2026: 100vh на мобильных браузерах (особенно Android Chrome) считается по
+       высоте экрана БЕЗ учёта появившейся клавиатуры — когда открываешь клавиатуру, чтобы что-то
+       написать, вся раскладка "уплывает", и верхнюю панель приходится доскроллить заново, хотя по
+       структуре она и так вынесена за пределы прокручиваемой зоны (#messages). 100dvh — это
+       "динамическая" высота вьюпорта, которая современные браузеры пересчитывают с учётом реально
+       видимой области (клавиатура, адресная строка) — оставлена и обычная 100vh как фолбэк для
+       старых браузеров, которые dvh не поддерживают (более поздняя строка перекрывает более
+       раннюю, если поддерживается). */
+    #topbar,#quickBar,#healthBar{flex-shrink:0}
+    /* Добавлено 03.09.2026: без touch-action браузер на Android ждёт чуть дольше перед тем как
+       засчитать тап (проверяет, не двойной ли это тап/жест зума) — за это время ОС иногда успевает
+       перехватить нажатие как долгое и вызвать системный оверлей "Circle to Search" вместо клика
+       по кнопке. touch-action:manipulation убирает эту задержку для интерактивных элементов —
+       тап засчитывается сразу, длинные нажатия не путаются с обычными кликами. */
+    button,input,textarea,a{touch-action:manipulation}
   </style>
 </head>
 <body>
@@ -609,7 +624,7 @@
 </div>
 
 <!-- TOPBAR -->
-<div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid #e2e8f0;flex-shrink:0;background:#ffffff;gap:10px">
+<div id="topbar" style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid #e2e8f0;flex-shrink:0;background:#ffffff;gap:10px">
   <button onclick="toggleSidebar()" style="background:none;border:none;color:#6b7280;font-size:18px;padding:2px">☰</button>
   <span id="chatTitle" style="flex:1;font-size:17px;font-weight:600;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Новая тема</span>
   <div id="searchBadge" style="display:none;font-size:11px;color:#4ade80;background:#052e16;padding:2px 8px;border-radius:4px;border:1px solid #4ade8033">🌐 поиск</div>
@@ -866,7 +881,28 @@ function stopThinking(){
     try{ wakeLock.release().catch(function(){}); }catch(e){}
     wakeLock=null;
   }
+  // Подстраховка (добавлено 03.09.2026): кнопка отправки в разных send-функциях блокируется
+  // ДО try/catch, а какой-то из шагов между блокировкой и самим запросом теоретически может
+  // бросить необработанное исключение раньше, чем код дойдёт до её разблокировки — тогда кнопка
+  // осталась бы навсегда disabled ("нет никакой реакции" при нажатии). stopThinking() вызывается
+  // в конце любого сценария отправки, так что заодно гарантированно возвращаем кнопку в рабочее
+  // состояние здесь, независимо от того, что случилось выше по стеку.
+  const sb=document.getElementById("sendBtn");
+  if(sb){ sb.disabled=false; sb.textContent="↑"; sb.style.background="linear-gradient(135deg,#6366f1,#8b5cf6)"; }
 }
+
+// Глобальная страховка (добавлено 03.09.2026): если где-то в цепочке отправки происходит
+// необработанное исключение ДО того, как выполнение доходит до stopThinking() — кнопка отправки
+// иначе осталась бы залипшей disabled навсегда. Слушаем и синхронные ошибки, и отклонённые
+// промисы, и на любой из них принудительно возвращаем кнопку в рабочее состояние.
+window.addEventListener("error", function(){
+  const sb=document.getElementById("sendBtn");
+  if(sb && sb.disabled){ sb.disabled=false; sb.textContent="↑"; sb.style.background="linear-gradient(135deg,#6366f1,#8b5cf6)"; }
+});
+window.addEventListener("unhandledrejection", function(){
+  const sb=document.getElementById("sendBtn");
+  if(sb && sb.disabled){ sb.disabled=false; sb.textContent="↑"; sb.style.background="linear-gradient(135deg,#6366f1,#8b5cf6)"; }
+});
 
 // Браузер автоматически снимает Wake Lock при переключении вкладки/приложения (это его
 // стандартное поведение, обойти нельзя) — но если пользователь вернулся, а ответ ещё не
