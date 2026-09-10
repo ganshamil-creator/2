@@ -9,6 +9,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-title" content="AI Hub"/>
   <link rel="apple-touch-icon" href="icon-192.png"/>
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png"/>
+  <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png"/>
   <script>
     // Глобальный обработчик ошибок — предотвращает чёрный экран
     window.onerror = function(msg, src, line, col, err){
@@ -7764,6 +7766,18 @@ window.saveChats = function(chats){
     }
   }
 };
+</script>
+<script>
+  // Регистрация Service Worker — нужна ТОЛЬКО для того, чтобы Chrome предлагал полноценную
+  // установку PWA (standalone-режим, без интерфейса Chrome вокруг), а не просто ярлык-закладку.
+  // Сам sw.js ничего не кэширует — см. комментарий в самом файле. Добавлено 10.09.2026.
+  if("serviceWorker" in navigator){
+    window.addEventListener("load", function(){
+      navigator.serviceWorker.register("sw.js").catch(function(e){
+        console.warn("Service Worker не зарегистрировался:", e);
+      });
+    });
+  }
 </script>
 </body>
 </html>
