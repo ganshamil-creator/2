@@ -5410,6 +5410,9 @@ function showModePicker(){
 
   // Быстрый режим — без попапа
   if(quickMode){ send(); return; }
+  // Режим изображений — без попапа (Дебаты/Консолидированный тут не применимы,
+  // sendImageGen() всегда один и тот же вызов Gemini Image)
+  if(imageGenMode){ send(); return; }
 
   // Показываем попап
   const overlay=document.getElementById("modePickerOverlay");
