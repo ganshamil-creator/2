@@ -637,6 +637,7 @@
   <button onclick="openMemoryModal()" id="memoryBtn" title="Сквозная память" style="padding:5px 10px;background:#f5f3ff;border:1px solid #c4b5fd;border-radius:6px;color:#7c3aed;font-size:14px;position:relative">🧠<span id="memoryBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:#7c3aed;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;line-height:14px;text-align:center"></span></button>
   <button onclick="toggleHealthMode()" id="healthBtn" title="Health Manager" style="padding:5px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;color:#16a34a;font-size:14px">🫀</button>
   <button onclick="toggleQuickMode()" id="quickBtn" title="Быстрый режим — один AI без синтеза" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:14px">⚡</button>
+  <button onclick="toggleImageGenMode()" id="imageGenBtn" title="Генерация/редактирование изображений (Gemini)" style="padding:5px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;color:#475569;font-size:14px">🎨</button>
   <!-- 👨‍💻 Код-дуэт убран 02.09.2026 — терял смысл после замены агента "claude" на дешёвый GLM-5.3-Flash
   <!-- 🖥️ Выполнение кода убрано 02.09.2026 — было завязано на серверный инструмент code_execution,
        уникальный именно для Anthropic API; после замены агента на GLM-5.3-Flash аналога нет. -->
@@ -655,6 +656,12 @@
 </div>
 
 <!-- CODE DUO BAR убран 02.09.2026 вместе с кнопкой -->
+
+<div id="imageGenBar" style="display:none;padding:8px 12px;background:#f5f3ff;border-top:1px solid #c4b5fd;flex-shrink:0;align-items:center;gap:8px;flex-wrap:wrap">
+  <span style="font-size:13px;font-weight:600;color:#6d28d9">🎨 Режим изображений:</span>
+  <span style="font-size:12px;color:#5b21b6">Прикрепи фото (📎) и опиши, что изменить — или просто опиши картинку с нуля, без фото</span>
+  <button onclick="toggleImageGenMode()" style="margin-left:auto;background:none;border:none;color:#6d28d9;font-size:16px;cursor:pointer">✕</button>
+</div>
 
 <div id="healthBar" style="display:none;padding:10px 14px;background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-bottom:2px solid #4ade80;flex-shrink:0">
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
@@ -3408,12 +3415,40 @@ async function callKimi(key, system, history){
   });
 }
 
+// Генерация/редактирование изображений через Gemini 3.1 Flash Image ("Nano Banana 2",
+// gemini-3.1-flash-image-preview) — тот же ключ Gemini, что уже используется для чата.
+// Если передано исходное фото (imageFiles) — модель РЕДАКТИРУЕТ его по текстовому описанию
+// (например "сделай так, будто фасад облицован кирпичом"), а не рисует с нуля. Без фото —
+// обычная генерация картинки по тексту. Добавлено 11.09.2026.
+async function generateGeminiImage(key, prompt, imageFiles){
+  const parts=[{text:prompt}];
+  (imageFiles||[]).forEach(f=>{
+    if(f.b64) parts.push({inline_data:{mime_type:f.type||"image/jpeg", data:f.b64}});
+  });
+  const payload={
+    contents:[{role:"user", parts}],
+    generationConfig:{responseModalities:["IMAGE","TEXT"]}
+  };
+  const modelName="gemini-3.1-flash-image-preview";
+  const d = await proxyFetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${key}`,{},payload);
+  if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
+  const cand=d.candidates && d.candidates[0];
+  if(!cand || !cand.content || !cand.content.parts) throw new Error("Пустой ответ от Gemini Image");
+  const imgPart=cand.content.parts.find(p=>p.inline_data || p.inlineData);
+  if(!imgPart) throw new Error("Модель не вернула изображение — возможно, запрос отклонён фильтрами безопасности. Текст ответа: "+(cand.content.parts.map(p=>p.text||"").join(" ")||"(пусто)"));
+  const inline=imgPart.inline_data||imgPart.inlineData;
+  return {mimeType: inline.mime_type||inline.mimeType||"image/png", b64: inline.data};
+}
+
 async function callGemini(key, system, history){
   // Таймаут зависит от модели. Старые модели (1.5, 2.0-flash, 2.0-flash-exp) отключены
   // Google в 2026 году — любой запрос к ним вернёт 404, поэтому используем актуальные.
-  // Обновлено 22.07.2026: gemini-3.6-flash вышла 21.07.2026 — токен-эффективнее и дешевле
-  // по выходным токенам ($7.50 vs $9 у 3.5 Flash), с более свежим знанием (март 2026).
+  // Обновлено 11.09.2026: gemini-3.8-flash вышла 02.09.2026 — та же вводная цена, что у 3.7
+  // Flash ($0.75/$3.75 за млн токенов), но заметно сильнее в кодинге и агентных задачах
+  // (бенчмарк DeepSWE). Чистое обновление без доплаты, поэтому поставлена первой; 3.6-flash
+  // и остальные оставлены как запасной вариант, если 3.8 будет недоступна/перегружена.
   const models=[
+    {name:"gemini-3.8-flash",       timeout:90000},
     {name:"gemini-3.6-flash",       timeout:90000},
     {name:"gemini-3.5-flash",       timeout:90000},
     {name:"gemini-2.5-pro",         timeout:150000},
@@ -4779,6 +4814,25 @@ function clearFiles(){
 // ── Quick Mode ─────────────────────────────────────────────────
 let quickMode = false;
 let chainMode = false;
+let imageGenMode = false;
+
+function toggleImageGenMode(){
+  imageGenMode = !imageGenMode;
+  const bar = document.getElementById("imageGenBar");
+  const btn = document.getElementById("imageGenBtn");
+  bar.style.display = imageGenMode ? "flex" : "none";
+  if(btn){
+    btn.style.background = imageGenMode ? "#ddd6fe" : "#f1f5f9";
+    btn.style.color = imageGenMode ? "#6d28d9" : "#475569";
+    btn.style.borderColor = imageGenMode ? "#c4b5fd" : "#e2e8f0";
+  }
+  if(imageGenMode){
+    // Своя картинка и обычный чат — разные режимы, включаем только один
+    if(quickMode) toggleQuickMode();
+    if(chainMode) toggleChainMode();
+    showToast("🎨 Режим изображений — опиши, что нарисовать/изменить");
+  }
+}
 
 function toggleQuickMode(){
   quickMode = !quickMode;
@@ -4794,6 +4848,7 @@ function toggleQuickMode(){
     populateQuickAgentSelect();
     populateQuickRoleSelect();
     if(chainMode) toggleChainMode();
+    if(imageGenMode) toggleImageGenMode();
     showToast("⚡ Быстрый режим — выбери AI и задай вопрос");
   }
 }
@@ -4828,6 +4883,7 @@ function toggleChainMode(){
     const qb = document.getElementById("quickBtn");
     if(qb){ qb.style.background="#f1f5f9"; qb.style.color="#475569"; qb.style.borderColor="#e2e8f0"; }
   }
+  if(chainMode && imageGenMode) toggleImageGenMode();
   showToast(chainMode ? "🔗 Цепочка включена: Perplexity→Gemini→Kimi→GPT→GLM→DeepSeek" : "🔗 Цепочка выключена");
 }
 
@@ -4840,6 +4896,80 @@ function toggleSearch(){
   document.getElementById("searchBadge").style.display=searchEnabled?"flex":"none";
   document.getElementById("searchBtn").style.background=searchEnabled?"#052e16":"#f1f5f9";
   document.getElementById("searchBtn").style.color=searchEnabled?"#4ade80":"#475569";
+}
+
+// ── Image Gen Send (Gemini 3.1 Flash Image, "Nano Banana 2") ──────────────
+async function sendImageGen(text, inp){
+  if(thinking) return;
+  const keys = getKeys();
+  if(!keys.gemini){
+    showToast("⚠️ Для генерации изображений нужен ключ Gemini в ⚙️ Настройки");
+    return;
+  }
+  const sourceImages = currentFiles.filter(f=>f.type && f.type.startsWith("image/") && f.b64);
+  if(!text && !sourceImages.length){ return; }
+  const chat = getChat();
+  const filesForBubble = [...currentFiles];
+  chat.messages.push({role:"user", content:text, files: filesForBubble});
+  appendUserBubble(text, filesForBubble);
+  inp.value=""; inp.style.height="auto";
+  clearFiles();
+  scrollToBottom();
+  startThinking();
+  const sendBtn=document.getElementById("sendBtn");
+  if(sendBtn){ sendBtn.disabled=true; sendBtn.textContent="⏳"; sendBtn.style.background="#374151"; }
+
+  const el=document.getElementById("messages");
+  const loadingCard=document.createElement("div");
+  loadingCard.className="fade";
+  loadingCard.style.cssText="display:flex;align-items:center;gap:8px;color:#6d28d9;font-size:13px;padding:8px 0";
+  loadingCard.innerHTML='<span class="pulse">🎨</span> '+(sourceImages.length?"Редактирую изображение...":"Генерирую изображение...");
+  el.appendChild(loadingCard); scrollToBottom();
+
+  try{
+    const prompt = text || "Создай изображение";
+    const result = await generateGeminiImage(keys.gemini, prompt, sourceImages);
+    loadingCard.remove();
+    const genFile = {name:"generated_"+Date.now()+".png", type:result.mimeType, b64:result.b64, size:Math.round(result.b64.length*0.75)};
+    chat.messages.push({role:"assistant", content:"🎨 Готово", imageGen:true, files:[genFile]});
+    saveChats(chats);
+    appendImageGenBubble(genFile);
+    scrollToBottom();
+  }catch(e){
+    loadingCard.remove();
+    const errEl=document.createElement("div");
+    errEl.className="fade";
+    errEl.style.cssText="color:#dc2626;font-size:13px;padding:8px 0;background:#fef2f2;border-radius:8px;padding:10px 12px";
+    errEl.textContent="❌ "+e.message;
+    el.appendChild(errEl); scrollToBottom();
+  }
+  stopThinking();
+}
+
+// Отдельная простая карточка для сгенерированного/отредактированного изображения — без сложной
+// многоагентной обвязки (карточек ответов, экспортов и т.п.), которая тут не нужна.
+function appendImageGenBubble(file){
+  const el=document.getElementById("messages");
+  const wrap=document.createElement("div");
+  wrap.className="fade";
+  wrap.style.cssText="display:flex;justify-content:flex-start;margin-bottom:4px";
+  const inner=document.createElement("div");
+  inner.style.cssText="background:#ffffff;border:1px solid #c4b5fd;border-radius:2px 14px 14px 14px;padding:10px;max-width:78%;box-shadow:0 1px 4px rgba(0,0,0,.06)";
+  const img=document.createElement("img");
+  img.src="data:"+file.type+";base64,"+file.b64;
+  img.style.cssText="width:100%;max-width:360px;border-radius:8px;display:block;cursor:pointer";
+  img.onclick=()=>window.open(img.src,"_blank");
+  inner.appendChild(img);
+  const actions=document.createElement("div");
+  actions.style.cssText="display:flex;gap:6px;margin-top:8px";
+  const dl=document.createElement("a");
+  dl.href=img.src; dl.download=file.name;
+  dl.style.cssText="padding:5px 10px;background:#6d28d9;color:#fff;border-radius:6px;font-size:11px;text-decoration:none;font-weight:600";
+  dl.textContent="⬇️ Скачать";
+  actions.appendChild(dl);
+  inner.appendChild(actions);
+  wrap.appendChild(inner);
+  el.appendChild(wrap);
 }
 
 // ── Quick Send (один агент) ────────────────────────────────────
@@ -5361,6 +5491,11 @@ async function send(){
     return;
   }
 
+  // 🎨 РЕЖИМ ИЗОБРАЖЕНИЙ — генерация/редактирование через Gemini Image
+  if(imageGenMode){
+    sendImageGen(text, inp);
+    return;
+  }
   // ⚡ БЫСТРЫЙ РЕЖИМ — один агент без синтеза
   if(quickMode){
     sendQuick(text, inp);
@@ -5885,6 +6020,10 @@ function renderMessages(){
     const user=userMsgs[i], assistant=assistantMsgs[i];
     if(user) appendUserBubble(user.content||"", user.files||[]);
     if(assistant){
+     if(assistant.imageGen && assistant.files && assistant.files[0]){
+       appendImageGenBubble(assistant.files[0]);
+       continue;
+     }
      try{
       const tid="hist_"+i;
       const agents=getAgents();
