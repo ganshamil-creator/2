@@ -677,6 +677,7 @@
     <button onclick="hAct('bioage')" style="padding:5px 10px;background:#fff;color:#15803d;border:1px solid #4ade80;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">⏱ Биовозраст</button>
     <button onclick="hAct('risks')" style="padding:5px 10px;background:#fff;color:#dc2626;border:1px solid #fca5a5;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">⚠️ Риски</button>
     <button onclick="searchPubMed()" style="padding:5px 10px;background:#0f172a;color:#60a5fa;border:1px solid #1e3a5f;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">🔬 Исследования PubMed</button>
+    <button onclick="searchSemanticScholar()" style="padding:5px 10px;background:#1e1b4b;color:#a5b4fc;border:1px solid #3730a3;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">📚 Semantic Scholar</button>
     <button onclick="openDiary()" style="padding:5px 10px;background:#fff;color:#7c3aed;border:1px solid #ddd6fe;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">📔 Дневник</button>
     <button onclick="openBioAge()" style="padding:5px 10px;background:#fff;color:#0f172a;border:1px solid #cbd5e1;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">⏱ Биовозраст</button>
     <button onclick="showReminders()" id="reminderBtn" style="display:none;padding:5px 10px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">🔔</button>
@@ -975,7 +976,7 @@ const FILE_EXPORT_NOTE = " В приложении есть кнопки экс�
 const ALL_AGENTS = [
   {id:"claude",    name:"GLM-5.3-Flash", emoji:"🟠", color:"#d97706", badge:"Z.ai", tag:"Дёшево + зрение",
    system:"Ты GLM-5.3-Flash от Zhipu AI (Z.ai). Давай аналитические глубокие ответы. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения. Помни историю разговора. Если в сообщении пользователя есть блок АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ИНТЕРНЕТА — используй их как главный источник фактов, они получены из веб-поиска прямо сейчас."+FILE_EXPORT_NOTE},
-  {id:"gemini",    name:"Gemini",     emoji:"🔴", color:"#ea4335", badge:"3.6 Flash", tag:"Быстрые ответы",
+  {id:"gemini",    name:"Gemini",     emoji:"🔴", color:"#ea4335", badge:"3.8 Flash", tag:"Быстрые ответы",
    system:"Ты Google Gemini. Анализируй глубоко. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём и процитируй его в ответе. Умеешь точно переводить между любыми языками. Используй дату из контекста. Если есть данные поиска — используй их."+FILE_EXPORT_NOTE},
   {id:"perplexity",name:"Perplexity", emoji:"🟣", color:"#8b5cf6", badge:"Agent API", tag:"Веб-поиск",
    system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."+FILE_EXPORT_NOTE},
@@ -2985,6 +2986,150 @@ async function askAIPubMed(){
     + "ИССЛЕДОВАНИЯ:\n" + summary;
 
   document.getElementById("pubmedModal").remove();
+  var inp = document.getElementById("queryInput");
+  if(inp) inp.value = text;
+  if(typeof healthMode === "undefined" || !healthMode) toggleHealthMode();
+  setTimeout(function(){
+    var btn = document.getElementById("sendBtn");
+    if(btn && !btn.disabled) btn.click();
+  }, 200);
+}
+
+// Semantic Scholar — дополнение к PubMed: та же логика поиска отклонений в биомаркерах
+// (переиспользует PUBMED_TERMS и extractClinicalTermsFromLastAnswer), но ищет по всей
+// науке (200+ млн работ), не только медицине, и не требует API-ключа для базового
+// использования. В отличие от PubMed, Semantic Scholar не понимает булев синтаксис
+// с полями [tiab] — поэтому булеву PubMed-строку переводим в обычный текстовый запрос.
+async function searchSemanticScholar(){
+  var bm = window.healthData.biomarkers;
+  var abnormal = [];
+  Object.keys(bm).forEach(function(name){
+    var vals = bm[name];
+    if(!vals || !vals.length) return;
+    var v = vals[vals.length-1].value;
+    var st = getBioStatus(name, v);
+    var pubmedTerm = PUBMED_TERMS[name] || (BIO_NORMS_ALIASES[name] && PUBMED_TERMS[BIO_NORMS_ALIASES[name]]);
+    if(st.emoji === "🔴" && pubmedTerm){
+      abnormal.push({name:name, value:v, status:st, term:pubmedTerm});
+    }
+  });
+
+  if(!abnormal.length){
+    showToast("🟢 Все биомаркеры в норме — нечего искать!");
+    return;
+  }
+
+  try{
+    var shortNames = abnormal.map(function(it){ return BIO_NORMS_ALIASES[it.name] || it.name; });
+    var clinicalTerms = await extractClinicalTermsFromLastAnswer(shortNames);
+    abnormal.forEach(function(it, idx){
+      var clinicalTerm = clinicalTerms[shortNames[idx]];
+      if(clinicalTerm && typeof clinicalTerm === "string" && clinicalTerm.trim()){
+        it.clinicalTerm = clinicalTerm.trim();
+      }
+    });
+  }catch(e){ /* тихо продолжаем без уточнения */ }
+
+  abnormal.forEach(function(it){
+    it.plainQuery = it.clinicalTerm
+      || it.term.replace(/\[tiab\]/g,"").replace(/["()]/g,"").replace(/\bAND\b|\bOR\b/g," ").replace(/\s+/g," ").trim();
+  });
+
+  var old = document.getElementById("ssModal");
+  if(old) old.remove();
+  var m = document.createElement("div");
+  m.id = "ssModal";
+  m.style.cssText = "position:fixed;inset:0;z-index:302;background:rgba(15,23,42,.95);display:flex;align-items:center;justify-content:center;padding:12px";
+  m.innerHTML = '<div style="background:#fff;border-radius:18px;width:100%;max-width:860px;max-height:94vh;display:flex;flex-direction:column;overflow:hidden">'
+    + '<div style="padding:14px 18px;background:linear-gradient(135deg,#1e1b4b,#3730a3);display:flex;align-items:center;gap:10px;flex-shrink:0">'
+    + '<span style="font-size:20px">📚</span>'
+    + '<div style="flex:1"><div style="font-size:14px;font-weight:700;color:#fff">Semantic Scholar — научный поиск</div>'
+    + '<div style="font-size:11px;color:rgba(255,255,255,.7)">200+ млн работ по всем наукам, не только медицине</div></div>'
+    + '<button onclick="document.getElementById(\'ssModal\').remove()" style="background:rgba(255,255,255,.1);border:none;color:#fff;font-size:22px;width:34px;height:34px;border-radius:8px;cursor:pointer">✕</button></div>'
+    + '<div id="ssResults" style="flex:1;overflow-y:auto;padding:14px 16px">'
+    + '<div class="pulse" style="color:#6366f1;font-size:13px">🔍 Ищу исследования по твоим отклонениям в Semantic Scholar...</div></div>'
+    + '<div style="padding:10px 14px;border-top:1px solid #e2e8f0;display:flex;gap:8px;flex-shrink:0;background:#f8fafc">'
+    + '<button id="ssAskBtn" style="display:none;padding:8px 14px;background:#f0fdf4;color:#15803d;border:1px solid #4ade80;border-radius:8px;font-size:12px;cursor:pointer;font-weight:600" onclick="askAISemanticScholar()">🫀 Спросить AI по этим исследованиям</button>'
+    + '<button onclick="document.getElementById(\'ssModal\').remove()" style="padding:8px 14px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;cursor:pointer">Закрыть</button>'
+    + '<div style="flex:1;font-size:11px;color:#94a3b8;display:flex;align-items:center">Источник: Semantic Scholar API (бесплатно, без ключа)</div>'
+    + '</div></div>';
+  document.body.appendChild(m);
+
+  var resultsEl = document.getElementById("ssResults");
+  var allAbstracts = [];
+
+  for(var i = 0; i < Math.min(abnormal.length, 4); i++){
+    var item = abnormal[i];
+    try{
+      // Без API-ключа у Semantic Scholar жёсткий лимит запросов (429 при частых обращениях) —
+      // та же логика паузы между показателями, что и у PubMed-поиска рядом.
+      if(i > 0) await sleep(500);
+      var searchUrl = "https://api.semanticscholar.org/graph/v1/paper/search?limit=3&fields=title,abstract,year,venue,externalIds,url&query=" + encodeURIComponent(item.plainQuery);
+      var r = await fetch(searchUrl);
+      if(r.status === 429){
+        resultsEl.innerHTML += '<div style="color:#dc2626;font-size:12px;padding:8px">⏳ Semantic Scholar временно ограничил запросы для показателя "' + escHtml(item.name) + '" — попробуй через минуту.</div>';
+        continue;
+      }
+      var d = await r.json();
+      var papers = (d.data || []).filter(function(p){ return p.title; });
+      if(!papers.length) continue;
+
+      allAbstracts = allAbstracts.concat(papers.map(function(p){ return {bm:item.name, value:item.value, status:item.status, article:p}; }));
+
+      var block = '<div style="margin-bottom:16px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">';
+      block += '<div style="padding:10px 14px;background:' + (item.status.emoji==="🔴"?"#fef2f2":"#fefce8") + ';border-bottom:1px solid #e2e8f0">';
+      block += '<div style="display:flex;align-items:center;gap:8px">';
+      block += '<span>' + item.status.emoji + '</span>';
+      block += '<span style="font-size:13px;font-weight:700;color:#1e293b">' + item.name + ': ' + item.value + ' (' + item.status.label + ')</span>';
+      block += '<span style="margin-left:auto;font-size:11px;color:#6b7280">найдено ' + papers.length + ' исследований</span></div>';
+      if(item.clinicalTerm){
+        block += '<div style="font-size:11px;color:#7c3aed;margin-top:3px">🎯 Уточнено по расшифровке: ' + escHtml(item.clinicalTerm) + '</div>';
+      }
+      block += '</div>';
+
+      papers.forEach(function(p){
+        var doi = p.externalIds && p.externalIds.DOI;
+        var link = p.url || (doi ? "https://doi.org/" + doi : "#");
+        block += '<div style="padding:12px 14px;border-bottom:1px solid #f1f5f9">';
+        block += '<div style="font-size:13px;font-weight:600;color:#1e293b;margin-bottom:5px">' + escHtml(p.title) + '</div>';
+        block += '<div style="font-size:11px;color:#6366f1;margin-bottom:6px">' + escHtml(p.venue||"Semantic Scholar") + ' · ' + (p.year||"") + ' · <a href="' + link + '" target="_blank" style="color:#4f46e5">открыть источник</a></div>';
+        if(p.abstract){
+          block += '<div style="font-size:12px;color:#475569;line-height:1.7;background:#f8fafc;border-radius:6px;padding:8px">' + escHtml(p.abstract.slice(0,400)) + (p.abstract.length>400?"...":"") + '</div>';
+        }
+        block += '</div>';
+      });
+      block += '</div>';
+
+      resultsEl.innerHTML = (resultsEl.querySelector('.pulse') ? '' : resultsEl.innerHTML) + block;
+    }catch(e){
+      resultsEl.innerHTML += '<div style="color:#dc2626;font-size:12px;padding:8px">❌ Ошибка поиска для ' + item.name + ': ' + e.message + '</div>';
+    }
+  }
+
+  var pulse = resultsEl.querySelector('.pulse');
+  if(pulse) pulse.remove();
+  if(!resultsEl.innerHTML.trim()) resultsEl.innerHTML = '<div style="color:#6b7280;font-size:13px">Исследования не найдены. Попробуй позже.</div>';
+
+  window._ssContext = allAbstracts;
+  var askBtn = document.getElementById("ssAskBtn");
+  if(askBtn && allAbstracts.length) askBtn.style.display = "inline-block";
+}
+
+async function askAISemanticScholar(){
+  var ctx = window._ssContext || [];
+  if(!ctx.length){ showToast("Нет данных для анализа"); return; }
+
+  var summary = ctx.map(function(c){
+    return "Биомаркер: " + c.bm + " (" + c.value + ", " + c.status.label + ")\n"
+      + "Исследование: " + c.article.title + " [" + (c.article.venue||"Semantic Scholar") + " " + (c.article.year||"") + "]\n"
+      + (c.article.abstract ? "Суть: " + c.article.abstract.slice(0,300) : "");
+  }).join("\n\n");
+
+  var text = "На основе следующих научных исследований из Semantic Scholar дай мне персональные рекомендации по улучшению биомаркеров. "
+    + "Для каждой рекомендации укажи источник (журнал/издание, год). Будь конкретен: дозировки, сроки, ожидаемый эффект.\n\n"
+    + "ИССЛЕДОВАНИЯ:\n" + summary;
+
+  document.getElementById("ssModal").remove();
   var inp = document.getElementById("queryInput");
   if(inp) inp.value = text;
   if(typeof healthMode === "undefined" || !healthMode) toggleHealthMode();
