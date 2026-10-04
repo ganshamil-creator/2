@@ -22,6 +22,14 @@
       console.warn("Unhandled promise rejection:", e.reason);
       e.preventDefault();
     });
+    // Временная заглушка на случай, если модуль Firebase (ниже) не загрузится
+    // или упадёт с ошибкой до того, как определит реальную функцию входа —
+    // без неё клик по кнопке "Войти" молча ничего не делал бы (window.signInWithGoogle
+    // оставался undefined, а onclick вызывает его через && и просто пропускает вызов).
+    // Модуль Firebase перезапишет это настоящей реализацией, если успешно загрузится.
+    window.signInWithGoogle = function(){
+      alert("Модуль авторизации (Firebase) не загрузился. Возможные причины:\n— нет связи с интернетом;\n— браузер блокирует сторонние скрипты (в Firefox проверь щит \"Усиленная защита от отслеживания\" в адресной строке — для этого сайта защиту нужно отключить);\n— временная ошибка сервера Firebase.\n\nПопробуй обновить страницу (потянуть вниз) или перезапустить браузер.");
+    };
   </script>
   <script src="vendor/pdf.min.js"></script>
   <script src="vendor/pdf-lib.min.js"></script>
@@ -75,17 +83,25 @@
 
     // ── Google Sign-In ──────────────────────────────────────────
     window.signInWithGoogle = function(){
+      provider.setCustomParameters({prompt: "select_account"});
+      // На телефонах popup для OAuth часто либо блокируется браузером, либо открывается
+      // и тут же теряет связь с родительским окном (особенно заметно в Firefox Android/iOS).
+      // На мобильных сразу используем signInWithRedirect — полную перезагрузку страницы
+      // на accounts.google.com и обратно; getRedirectResult() выше уже ждёт этот случай.
+      const isMobileUA = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      if(isMobileUA){
+        signInWithRedirect(auth, provider);
+        return;
+      }
       // Вызываем signInWithPopup синхронно из обработчика клика
       // Chrome на Android требует прямой связи popup с user gesture
-      provider.setCustomParameters({prompt: "select_account"});
       signInWithPopup(auth, provider).then(function(result){
         // onAuthStateChanged обработает автоматически
       }).catch(function(e){
         if(e.code === "auth/popup-closed-by-user" || e.code === "auth/cancelled-popup-request") return;
         if(e.code === "auth/popup-blocked"){
-          // Popup заблокирован — пробуем через новую вкладку
-          const url = "https://accounts.google.com";
-          alert("Браузер заблокировал всплывающее окно. Разреши popups для ai-hub-shamil.ru в настройках Chrome.");
+          // Popup заблокирован даже на десктопе — последний резерв: редирект
+          signInWithRedirect(auth, provider);
         } else if(e.code === "auth/unauthorized-domain"){
           alert("⚠️ Домен не авторизован в Firebase!");
         } else {
@@ -407,6 +423,11 @@
     }, 60000);
   } catch(globalFirebaseErr) {
     console.error("Firebase init error:", globalFirebaseErr);
+    // Если ошибка случилась раньше, чем определилась настоящая window.signInWithGoogle —
+    // показываем конкретную причину вместо молчания при клике на кнопку входа.
+    window.signInWithGoogle = function(){
+      alert("Не удалось инициализировать Firebase: " + (globalFirebaseErr && (globalFirebaseErr.message || globalFirebaseErr.code || String(globalFirebaseErr))));
+    };
     // Страница продолжает работать без Firebase (локальный режим)
     window.cloudSync = window.cloudSync || {
       userId: "anon_local",
@@ -4063,8 +4084,12 @@ async function toggleVoiceRecording(){
 function handleFiles(input){
   const files=Array.from(input.files);
   if(!files.length) return;
-  if(files.length>10){alert("Максимум 10 файлов");return;}
-  currentFiles=[];
+  // Файлы НАКАПЛИВАЮТСЯ, а не заменяются — важно для мобильных браузеров (особенно Firefox),
+  // где нативный диалог выбора часто не даёт выделить сразу несколько файлов, и пользователь
+  // прикрепляет их по одному через повторные нажатия на 📎. Раньше здесь стояло currentFiles=[],
+  // которое стирало уже прикреплённые файлы при каждом новом открытии диалога — баг именно с
+  // "не получается загрузить больше 1 файла", когда мультивыбор в самом диалоге недоступен.
+  if(currentFiles.length+files.length>10){alert("Максимум 10 файлов (уже прикреплено: "+currentFiles.length+")");return;}
   document.getElementById("filePreview").style.display="none";
   let loaded=0;
   files.forEach(f=>{
@@ -5410,9 +5435,6 @@ function showModePicker(){
 
   // Быстрый режим — без попапа
   if(quickMode){ send(); return; }
-  // Режим изображений — без попапа (Дебаты/Консолидированный тут не применимы,
-  // sendImageGen() всегда один и тот же вызов Gemini Image)
-  if(imageGenMode){ send(); return; }
 
   // Показываем попап
   const overlay=document.getElementById("modePickerOverlay");
