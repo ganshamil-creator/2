@@ -60,8 +60,15 @@
     let userId = null;
 
     // ── Обрабатываем результат redirect (мобильные браузеры) ────
-    // Обработка результата redirect (мобильные браузеры)
+    // Перед вызовом signInWithRedirect ставим флаг в sessionStorage (см. ниже) — он живёт
+    // в этой же вкладке независимо от того, смогло ли внутреннее хранилище Firebase (indexedDB)
+    // пережить переход на accounts.google.com и обратно. Если флаг стоит, а getRedirectResult
+    // вернул пусто без ошибки — значит именно это хранилище Firebase было заблокировано
+    // (приватный режим / защита от отслеживания в Firefox), и мы можем явно сказать об этом.
+    const _pendingRedirectKey = "ai_hub_auth_redirect_pending";
     getRedirectResult(auth).then(result => {
+      const wasPending = sessionStorage.getItem(_pendingRedirectKey) === "1";
+      sessionStorage.removeItem(_pendingRedirectKey);
       if(result && result.user){
         // Вручную обновляем UI — onAuthStateChanged может не сработать вовремя
         const u = result.user;
@@ -76,9 +83,21 @@
         setTimeout(()=>{ typeof showToast==="function" && showToast("✅ Вошёл как "+(u.displayName||u.email)); }, 500);
         // Загружаем данные из облака
         if(typeof initCloudData === "function") initCloudData();
+      } else if(wasPending){
+        // Вернулись с Google, но result пуст и ошибки не было — Firebase не смог
+        // восстановить состояние между вкладками/переходом. Типичная причина на мобильном
+        // Firefox — приватный режим или блокировка стороннего хранилища (indexedDB) для
+        // accounts.google.com / firebaseapp.com.
+        setTimeout(()=>{
+          alert("Вход через Google не завершился: вернулись со страницы Google, но браузер не сохранил результат авторизации.\n\nЕсли открыто приватное окно (Private Browsing) — войди в обычном окне, приватный режим стирает нужные данные при переходах между сайтами.\n\nЕсли окно обычное — проверь значок щита \"Усиленная защита от отслеживания\" рядом с адресной строкой и отключи защиту для этого сайта, затем попробуй снова.");
+        }, 300);
       }
     }).catch(e => {
-      if(e.code && e.code !== "auth/no-current-user") console.warn("Redirect result error:", e.code, e.message);
+      sessionStorage.removeItem(_pendingRedirectKey);
+      if(e.code && e.code !== "auth/no-current-user"){
+        console.warn("Redirect result error:", e.code, e.message);
+        setTimeout(()=>{ alert("Ошибка входа через Google: " + (e.message || e.code)); }, 300);
+      }
     });
 
     // ── Google Sign-In ──────────────────────────────────────────
@@ -90,6 +109,7 @@
       // на accounts.google.com и обратно; getRedirectResult() выше уже ждёт этот случай.
       const isMobileUA = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
       if(isMobileUA){
+        try{ sessionStorage.setItem(_pendingRedirectKey, "1"); }catch(e){}
         signInWithRedirect(auth, provider);
         return;
       }
