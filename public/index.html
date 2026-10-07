@@ -75,25 +75,17 @@
 
     // ── Google Sign-In ──────────────────────────────────────────
     window.signInWithGoogle = function(){
-      provider.setCustomParameters({prompt: "select_account"});
-      // На телефонах popup для OAuth часто либо блокируется браузером, либо открывается
-      // и тут же теряет связь с родительским окном (особенно заметно в Firefox Android/iOS).
-      // На мобильных сразу используем signInWithRedirect — полную перезагрузку страницы
-      // на accounts.google.com и обратно; getRedirectResult() выше уже ждёт этот случай.
-      const isMobileUA = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-      if(isMobileUA){
-        signInWithRedirect(auth, provider);
-        return;
-      }
       // Вызываем signInWithPopup синхронно из обработчика клика
       // Chrome на Android требует прямой связи popup с user gesture
+      provider.setCustomParameters({prompt: "select_account"});
       signInWithPopup(auth, provider).then(function(result){
         // onAuthStateChanged обработает автоматически
       }).catch(function(e){
         if(e.code === "auth/popup-closed-by-user" || e.code === "auth/cancelled-popup-request") return;
         if(e.code === "auth/popup-blocked"){
-          // Popup заблокирован даже на десктопе — последний резерв: редирект
-          signInWithRedirect(auth, provider);
+          // Popup заблокирован — пробуем через новую вкладку
+          const url = "https://accounts.google.com";
+          alert("Браузер заблокировал всплывающее окно. Разреши popups для ai-hub-shamil.ru в настройках Chrome.");
         } else if(e.code === "auth/unauthorized-domain"){
           alert("⚠️ Домен не авторизован в Firebase!");
         } else {
@@ -492,7 +484,6 @@
       <div>🔴 <b style="color:#f87171">Gemini</b> — <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#60a5fa">aistudio.google.com/apikey</a> → <b style="color:#4ade80">Бесплатно</b></div>
       <div>🟣 <b style="color:#c084fc">Perplexity</b> — <a href="https://www.perplexity.ai/settings/api" target="_blank" style="color:#60a5fa">perplexity.ai/settings/api</a></div>
       <div>⚡ <b style="color:#22d3ee">DeepSeek</b> — <a href="https://platform.deepseek.com/api_keys" target="_blank" style="color:#60a5fa">platform.deepseek.com</a> → <b style="color:#4ade80">Очень дёшево</b></div>
-      <div>🔵 <b style="color:#60a5fa">Kimi</b> — <a href="https://platform.kimi.ai" target="_blank" style="color:#60a5fa">platform.kimi.ai</a> → API Keys</div>
       <div>🌐 <b style="color:#4ade80">Tavily</b> — <a href="https://app.tavily.com" target="_blank" style="color:#60a5fa">app.tavily.com</a> → 1000 поисков/мес бесплатно</div>
     </div>
 
@@ -540,24 +531,15 @@
         <div style="font-size:10px;color:#6b7280;margin-top:4px">platform.deepseek.com → API Keys → Create</div>
       </div>
 
-      <!-- Kimi -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-          <span>🔵</span><span style="font-size:11px;font-weight:600;color:#3b82f6">Kimi</span>
-          <span style="font-size:9px;background:#dcfce7;color:#166534;padding:1px 6px;border-radius:3px;margin-left:auto">Креатив + Финансы</span>
-        </div>
-        <input type="password" id="key_kimi" placeholder="sk-..." style="width:100%;padding:7px 10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;color:#1e293b;font-size:12px"/>
-        <div style="font-size:10px;color:#6b7280;margin-top:4px">platform.kimi.ai → API Keys</div>
-      </div>
 
       <!-- GPT-4o -->
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-          <span>🟢</span><span style="font-size:11px;font-weight:600;color:#10a779">GPT-4o</span>
-          <span style="font-size:9px;background:#f0fdf4;color:#166534;padding:1px 6px;border-radius:3px;margin-left:auto">Практика + Советы</span>
+          <span>🎙️</span><span style="font-size:11px;font-weight:600;color:#10a779">OpenAI (голосовой ввод)</span>
+          <span style="font-size:9px;background:#f0fdf4;color:#166534;padding:1px 6px;border-radius:3px;margin-left:auto">Только Whisper</span>
         </div>
         <input type="password" id="key_gpt" placeholder="sk-proj-..." style="width:100%;padding:7px 10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;color:#1e293b;font-size:12px"/>
-        <div style="font-size:10px;color:#6b7280;margin-top:4px">platform.openai.com/api-keys → Create</div>
+        <div style="font-size:10px;color:#6b7280;margin-top:4px">Нужен только для голосового ввода (Whisper). Как чат-агент не используется.</div>
       </div>
 
       <!-- Gamma -->
@@ -614,22 +596,6 @@
       </div>
     </div>
     <iframe id="revealFrame" style="flex:1;border:none;width:100%" sandbox="allow-scripts allow-same-origin"></iframe>
-  </div>
-</div>
-
-<!-- KIMI MODAL -->
-<div id="kimiModal" style="display:none;position:fixed;inset:0;z-index:250;background:rgba(100,116,139,.6);align-items:center;justify-content:center;padding:16px">
-  <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;padding:22px;width:100%;max-width:640px;max-height:85vh;display:flex;flex-direction:column;gap:12px">
-    <div style="display:flex;align-items:center;justify-content:space-between">
-      <span style="font-size:14px;font-weight:700;color:#4f8ef7">🔵 Kimi — Структура презентации</span>
-      <div style="display:flex;gap:8px">
-        <button id="kimiCopyBtn" style="padding:5px 12px;background:#1e293b;color:#94a3b8;border:1px solid #374151;border-radius:7px;font-size:11px">📋 Копировать</button>
-        <button onclick="document.getElementById('kimiModal').style.display='none'" style="background:none;border:none;color:#6b7280;font-size:20px">✕</button>
-      </div>
-    </div>
-    <div style="font-size:11px;color:#6b7280;padding:4px 8px;background:#f8fafc;border-radius:6px" id="kimiModalTopic"></div>
-    <div id="kimiModalContent" style="flex:1;overflow-y:auto;font-size:13px;line-height:1.8;color:#1e293b;white-space:pre-wrap;background:#f8fafc;border-radius:8px;padding:14px;border:1px solid #e2e8f0"></div>
-    <div style="font-size:10px;color:#6b7280;text-align:center">Скопируй и вставь в Gamma, Canva или PowerPoint</div>
   </div>
 </div>
 
@@ -927,7 +893,7 @@ document.addEventListener("visibilitychange", function(){
 });
 let currentFiles = [];
 let searchEnabled = false;
-let activeAgentIds = JSON.parse(localStorage.getItem("active_agents")||"null") || ["claude","gemini","perplexity","deepseek"];
+let activeAgentIds = (JSON.parse(localStorage.getItem("active_agents")||"null") || ["claude","gemini","perplexity","deepseek"]).filter(x=>["claude","gemini","perplexity","deepseek"].includes(x));
 
 function getChat(){ return chats.find(c=>c.id===activeChatId); }
 
@@ -989,10 +955,6 @@ const ALL_AGENTS = [
    system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."+FILE_EXPORT_NOTE},
   {id:"deepseek",  name:"DeepSeek",   emoji:"⚡", color:"#06b6d4", badge:"V4", tag:"Дешёвый код",
    system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста. ВАЖНО: ты НЕ умеешь видеть прикреплённые изображения/сканы/чертежи напрямую — тебе доступен только извлечённый из них текст (если он есть). Если этого текста недостаточно, чтобы ответить по существу (например, план/чертёж/схема, где важна именно визуальная структура), — прямо и честно скажи, что не можешь увидеть изображение и опираешься только на обрывочный текст, и НЕ придумывай/не угадывай, что может быть на картинке (название чертежа, цифры, схему и т.п.). Ложное уверенное угадывание хуже честного отказа."+FILE_EXPORT_NOTE},
-  {id:"kimi",      name:"Kimi",       emoji:"🔵", color:"#3b82f6", badge:"K3", tag:"Длинные документы",
-   system:"Ты Kimi K3 от Moonshot AI. Специализируешься на креативных задачах, финансовых расчётах и анализе длинных документов. Давай нестандартные практичные решения. Если есть контекст от предыдущих агентов — используй его и дополни своим уникальным взглядом. Используй дату из контекста. Отвечай именно на то, что спросили — не бери на себя лишнюю инициативу и не делай сверх запрошенного без явной просьбы."+FILE_EXPORT_NOTE},
-  {id:"gpt",       name:"GPT-5.6",     emoji:"🟢", color:"#10a779", badge:"Luna", tag:"Практичные советы",
-   system:"Ты GPT-5.6 Luna от OpenAI. Давай практичные пошаговые решения и конкретные рекомендации. Специализируешься на прикладных задачах, инструкциях и советах. Если есть контекст от предыдущих агентов — обогати его практическими советами. Используй дату из контекста."+FILE_EXPORT_NOTE},
 ];
 
 // Fable — раньше был премиальной Claude-моделью уровня Mythos, недоступен для выбора в
@@ -3224,38 +3186,6 @@ async function directOrProxyFetch(url, headers, body){
   }
 }
 
-async function callOpenAI(key, system, history){
-  return callWithRetry(async()=>{
-    // Обновлено 30.07.2026: gpt-5.4-mini -> gpt-5.6-luna. Новое поколение (5.6 вместо 5.4),
-    // ощутимо дешевле после последнего снижения цен OpenAI ($0.20/$1.20 за млн токенов), и по
-    // независимым бенчмаркам агентных задач обгоняет даже Claude Fable 5/Opus 4.8, несмотря на
-    // то что это самый дешёвый тир линейки — подходит под тег "Практичные советы" идеально.
-    const body=JSON.stringify({model:"gpt-5.6-luna",max_completion_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
-    let d;
-    if(isMobile){
-      d=await proxyFetch("https://api.openai.com/v1/chat/completions",{"Authorization":"Bearer "+key},body);
-    } else {
-      try{
-        const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),90000);
-        const r=await fetch("https://api.openai.com/v1/chat/completions",{
-          method:"POST",signal:ctrl.signal,
-          headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},
-          body
-        });
-        clearTimeout(t); d=await r.json();
-      }catch(directErr){
-        // Прямой запрос из браузера может быть заблокирован на уровне сети/провайдера
-        // (например в РФ без VPN) — "Failed to fetch" в этом случае значит именно это,
-        // и повторять тот же прямой запрос бессмысленно. Откатываемся на прокси
-        // (Cloud Function идёт с серверов Google, а не с IP пользователя).
-        d=await proxyFetch("https://api.openai.com/v1/chat/completions",{"Authorization":"Bearer "+key},body);
-      }
-    }
-    if(d.error) throw new Error(d.error.message);
-    return d.choices[0].message.content.trim();
-  });
-}
-
 // ЗАМЕНЕНО 02.09.2026: раньше выбирала между claude-sonnet-5/claude-haiku-4-5 по сложности
 // запроса. У GLM-5.3-Flash одна модель на все случаи — функцию оставили (чтобы не трогать
 // вызовы по всему коду), но она теперь просто всегда возвращает единственную модель.
@@ -3362,56 +3292,6 @@ async function callClaude(key, system, history, onChunk, forceModel){
       if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
       return (d.choices&&d.choices[0]&&d.choices[0].message&&d.choices[0].message.content||"").trim();
     }
-  });
-}
-
-async function callKimi(key, system, history){
-  return callWithRetry(async()=>{
-    // Защита: если в само поле ключа случайно попало "Bearer ..." (например, при копировании
-    // из примера curl) — убираем этот префикс, иначе заголовок получится "Bearer Bearer sk-..."
-    // и API вернёт Invalid Authentication даже с правильным ключом.
-    const cleanKey=key.replace(/^Bearer\s+/i,"").trim();
-    // РАНЬШЕ здесь первыми двумя попытками хаб всегда стучался в api.kimi.com/coding/v1 —
-    // это ОТДЕЛЬНЫЙ продукт "Kimi Code" со своими ключами. Обычный ключ с platform.moonshot.ai
-    // там гарантированно не подходит — то есть при каждом сообщении с Kimi хаб сначала дважды
-    // гарантированно ловил Invalid Authentication, и только потом (если вообще доходило) шёл на
-    // рабочий адрес.
-    // ОБНОВЛЕНО 16.08.2026: разобрали реальный случай — api.moonshot.ai возвращал "Invalid
-    // Authentication" для конкретной пары ключ+kimi-k3, хотя ТОТ ЖЕ ключ прекрасно работал в
-    // Playground на platform.moonshot.ai (то есть ключ валиден, просто эта конкретная модель на
-    // этом конкретном адресе — нет). Судя по официальной документации, kimi-k3 официально живёт
-    // на platform.kimi.ai (api.kimi.ai), а не на platform.moonshot.ai — поэтому теперь он идёт
-    // ПЕРВЫМ. Также убрали шорткат "auth-ошибка = не пробовать остальные адреса" — на практике
-    // он оказался неверным допущением именно для этого случая: одна и та же ошибка на одном
-    // домене вовсе не значит то же самое на другом, если домены — это фактически разные платформы
-    // с разной областью действия ключей/моделей, а не просто зеркала одного бэкенда.
-    // Kimi K3 (вышла 16.07.2026) — замена K2.6, крупный апгрейд (2.8Т параметров, нативное
-    // зрение, окно 1М токенов). Дороже прежней K2.6, поэтому reasoning_effort зафиксирован на
-    // "high" (баланс скорости/цены/качества по рекомендации самой Moonshot), а не "max" —
-    // на max независимые тесты отмечают неоправданно большой расход токенов на рассуждения
-    // даже для простых вопросов.
-    const primary={url:"https://api.kimi.ai/v1/chat/completions", model:"kimi-k3"};
-    const mirrors=[
-      {url:"https://api.moonshot.ai/v1/chat/completions", model:"kimi-k3"},
-      {url:"https://api.moonshot.cn/v1/chat/completions", model:"kimi-k3"}
-    ];
-    async function tryEndpoint(url, model){
-      const kimiBody=JSON.stringify({model,reasoning_effort:"high",max_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
-      const resp=await proxyFetch(url,{"Authorization":"Bearer "+cleanKey},kimiBody);
-      if(resp && resp.error) throw new Error(resp.error.message||JSON.stringify(resp.error));
-      return resp;
-    }
-    let d=null, lastErr=null, allErrs=[];
-    // Пробуем ВСЕ адреса по очереди, не сдаёмся на первой же "похожей на auth" ошибке — она
-    // может значить "неверный ключ ИМЕННО для этого домена/модели", а не "ключ вообще нерабочий".
-    for(const ep of [primary, ...mirrors]){
-      try{ d=await tryEndpoint(ep.url, ep.model); lastErr=null; break; }
-      catch(e){ lastErr=e.message; allErrs.push(ep.url+": "+e.message); }
-    }
-    if(!d){
-      throw new Error("Kimi не ответил ни с одного адреса. "+(allErrs.join(" | "))+". Проверь на platform.kimi.ai / platform.moonshot.ai: 1) ключ скопирован полностью, без пробелов и без 'Bearer '; 2) на счету есть реальное пополнение (не только ваучер) — Moonshot требует минимум $1; 3) модель kimi-k3 включена именно для этого ключа/проекта.");
-    }
-    return (d.choices[0].message.content||"").trim();
   });
 }
 
@@ -3753,8 +3633,6 @@ async function callAgent(agent, system, history, onChunk){
     case "gemini":     return keys.gemini?callGemini(keys.gemini,effectiveSystem,history):Promise.reject(new Error("Добавь ключ Gemini в ⚙️ Настройки → aistudio.google.com (бесплатно)"));
     case "perplexity": return keys.perplexity?callPerplexity(keys.perplexity,effectiveSystem,history):Promise.reject(new Error("Добавь ключ Perplexity в ⚙️ Настройки → perplexity.ai/settings/api"));
     case "deepseek":   return keys.deepseek?callDeepSeek(keys.deepseek,effectiveSystem,history,onChunk):Promise.reject(new Error("Добавь ключ DeepSeek в ⚙️ Настройки → platform.deepseek.com"));
-    case "kimi":       return keys.kimi?callKimi(keys.kimi,effectiveSystem,history):Promise.reject(new Error("Добавь ключ Kimi в ⚙️ Настройки → platform.kimi.ai"));
-    case "gpt":        return keys.gpt?callOpenAI(keys.gpt,effectiveSystem,history):Promise.reject(new Error("Добавь ключ GPT-4o в ⚙️ Настройки → platform.openai.com"));
   }
 }
 
@@ -4071,12 +3949,8 @@ async function toggleVoiceRecording(){
 function handleFiles(input){
   const files=Array.from(input.files);
   if(!files.length) return;
-  // Файлы НАКАПЛИВАЮТСЯ, а не заменяются — важно для мобильных браузеров (особенно Firefox),
-  // где нативный диалог выбора часто не даёт выделить сразу несколько файлов, и пользователь
-  // прикрепляет их по одному через повторные нажатия на 📎. Раньше здесь стояло currentFiles=[],
-  // которое стирало уже прикреплённые файлы при каждом новом открытии диалога — баг именно с
-  // "не получается загрузить больше 1 файла", когда мультивыбор в самом диалоге недоступен.
-  if(currentFiles.length+files.length>10){alert("Максимум 10 файлов (уже прикреплено: "+currentFiles.length+")");return;}
+  if(files.length>10){alert("Максимум 10 файлов");return;}
+  currentFiles=[];
   document.getElementById("filePreview").style.display="none";
   let loaded=0;
   files.forEach(f=>{
@@ -4888,7 +4762,7 @@ function toggleChainMode(){
     if(qb){ qb.style.background="#f1f5f9"; qb.style.color="#475569"; qb.style.borderColor="#e2e8f0"; }
   }
   if(chainMode && imageGenMode) toggleImageGenMode();
-  showToast(chainMode ? "🔗 Цепочка включена: Perplexity→Gemini→Kimi→GPT→GLM→DeepSeek" : "🔗 Цепочка выключена");
+  showToast(chainMode ? "🔗 Цепочка включена: Perplexity→Gemini→GLM→DeepSeek" : "🔗 Цепочка выключена");
 }
 
 
@@ -5037,7 +4911,7 @@ async function sendQuick(text, inp){
       imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
       content.push({type:"text",text:enrichedMsg});
       agentHistory=[...history.slice(0,-1),{role:"user",content}];
-    } else if(["gpt","gemini","perplexity","kimi"].includes(agentId)){
+    } else if(["gemini","perplexity"].includes(agentId)){
       const content=[];
       imageFiles.forEach(f=>{content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}});});
       content.push({type:"text",text:enrichedMsg});
@@ -5045,7 +4919,7 @@ async function sendQuick(text, inp){
     }
     // DeepSeek не поддерживает изображения — только текст/OCR
     else if(agentId==="deepseek"){
-      showToast("⚠️ DeepSeek не умеет распознавать изображения — переключись на GLM/Gemini/GPT/Perplexity/Kimi, если нужно прочитать фото");
+      showToast("⚠️ DeepSeek не умеет распознавать изображения — переключись на GLM/Gemini/Perplexity, если нужно прочитать фото");
     }
   }
 
@@ -5202,7 +5076,7 @@ async function sendFirst(){
           const content=[{type:"text",text:lastMsg.content}];
           imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
           agentHistory=[...agentHistory.slice(0,-1),{role:"user",content}];
-        } else if(["gemini","gpt","perplexity","kimi"].includes(a.id)){
+        } else if(["gemini","perplexity"].includes(a.id)){
           const content=[];
           imageFiles.forEach(f=>{content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}});});
           content.push({type:"text",text:lastMsg.content});
@@ -5234,7 +5108,7 @@ async function sendFirst(){
 }
 
 // ════════════════════════════════════════════════════════════════
-// 🔗 РЕЖИМ ЦЕПОЧКА — 6 агентов передают контекст друг другу
+// 🔗 РЕЖИМ ЦЕПОЧКА — агенты передают контекст друг другу
 // ════════════════════════════════════════════════════════════════
 async function sendChain(text, inp){
   const today=getToday();
@@ -5284,7 +5158,7 @@ async function sendChain(text, inp){
     container.insertBefore(bar,container.firstChild);
   }
 
-  const visionSet=new Set(["claude","gemini","perplexity","gpt","kimi"]);
+  const visionSet=new Set(["claude","gemini","perplexity"]);
   function makeVisionHistoryFor(a, baseHistory, msgText){
     if(!imageFiles.length) return [...baseHistory.slice(0,-1),{role:"user",content:today+msgText}];
     if(a.id==="claude"){
@@ -5635,7 +5509,7 @@ async function send(){
   appendTurnContainer(turnId,agents,cols);
 
   const results={};
-  const visionSet=new Set(["claude","gemini","perplexity","gpt","kimi"]);
+  const visionSet=new Set(["claude","gemini","perplexity"]);
 
   // Функция создания onChunk для агента — показывает стрим в карточке
   function makeChunkHandler(a){
@@ -6214,8 +6088,6 @@ async function callByAgentId(agentId, system, history){
       case "gemini":     return keys.gemini?await callGemini(keys.gemini,system,history):null;
       case "perplexity": return keys.perplexity?await callPerplexity(keys.perplexity,system,history):null;
       case "deepseek":   return keys.deepseek?await callDeepSeek(keys.deepseek,system,history):null;
-      case "kimi":       return keys.kimi?await callKimi(keys.kimi,system,history):null;
-      case "gpt":        return keys.gpt?await callOpenAI(keys.gpt,system,history):null;
       default: return null;
     }
   }catch(e){ return null; } // не смогли конкретным агентом — пусть решает synthesize()
@@ -6297,28 +6169,6 @@ async function exportPptxReal(turnId, preferredAgentId){
     await pres.writeFile({ fileName: fname + ".pptx" });
     showToast("✅ PPTX скачан!");
   }catch(e){ showToast("❌ Ошибка: "+e.message); }
-}
-
-async function kimiPresent(turnId){
-  const el=document.getElementById(turnId+"_consolidated");
-  if(!el) return;
-  const keys=getKeys();
-  if(!keys.kimi){alert("Добавь ключ Kimi в ⚙️ Настройки → platform.kimi.ai");return;}
-  const chat=getChat();
-  showToast("🔵 Kimi генерирует слайды...");
-  try{
-    const system="Ты генератор презентаций. Возвращай ТОЛЬКО валидный JSON без markdown.";
-    const prompt=`Создай презентацию. Тема: ${chat?chat.title:"Презентация"}. Текст: ${(el.dataset.raw||el.textContent).slice(0,3000)}\n\nВерни ТОЛЬКО JSON:\n{"title":"Название","slides":[{"type":"title","heading":"Заголовок","body":"Подзаголовок"},{"type":"points","heading":"Раздел","points":["Тезис 1","Тезис 2","Тезис 3"]},{"type":"quote","quote":"Вывод","author":"Kimi"},{"type":"conclusion","heading":"Итоги","body":"Вывод"}]}\nСоздай 7-9 слайдов.`;
-    const h=[{role:"user",content:prompt}];
-    let raw;
-    raw=await callKimi(keys.kimi,system,h);
-    const cleaned=raw.replace(/```json\s*/gi,"").replace(/```\s*/gi,"").trim();
-    const match=cleaned.match(/\{[\s\S]*\}/);
-    let data;
-    try{data=JSON.parse(match?match[0]:cleaned);}catch(e){showKimiModal(raw,chat?chat.title:"Презентация");return;}
-    showToast("✅ Kimi слайды готовы!");
-    buildRevealPresentation(data);
-  }catch(e){alert("Ошибка Kimi: "+e.message);}
 }
 
 function buildRevealPresentation(data){
@@ -6407,13 +6257,6 @@ function showRevealModal(html, title){
 
 function openRevealNewTab(){
   if(window._revealHtml){const w=window.open("","_blank");if(w){w.document.write(window._revealHtml);w.document.close();}}
-}
-
-function showKimiModal(text, title){
-  document.getElementById("kimiModalTopic").textContent=title;
-  document.getElementById("kimiModalContent").textContent=text;
-  document.getElementById("kimiCopyBtn").onclick=()=>navigator.clipboard.writeText(text).then(()=>showToast("📋 Скопировано!"));
-  document.getElementById("kimiModal").style.display="flex";
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -7242,7 +7085,6 @@ function showSettings(){
   document.getElementById("key_gemini").value=keys.gemini||"";
   document.getElementById("key_perplexity").value=keys.perplexity||"";
   document.getElementById("key_deepseek").value=keys.deepseek||"";
-  document.getElementById("key_kimi").value=keys.kimi||"";
   document.getElementById("key_gpt").value=keys.gpt||"";
   document.getElementById("key_gamma").value=keys.gamma||"";
   document.getElementById("key_tavily").value=keys.tavily||"";
@@ -7262,17 +7104,12 @@ function saveSettings(){
     perplexity:cleanKey(document.getElementById("key_perplexity").value),
     deepseek:cleanKey(document.getElementById("key_deepseek").value),
     tavily:cleanKey(document.getElementById("key_tavily").value),
-    kimi:cleanKey(document.getElementById("key_kimi").value),
     gpt:cleanKey(document.getElementById("key_gpt").value),
     gamma:cleanKey(document.getElementById("key_gamma").value),
   };
   saveKeys(newKeys);
   // Автоматически включаем агентов если введён ключ
-  if(newKeys.kimi && !activeAgentIds.includes("kimi")) activeAgentIds.push("kimi");
-  if(newKeys.gpt && !activeAgentIds.includes("gpt")) activeAgentIds.push("gpt");
   // Отключаем если ключ удалён
-  if(!newKeys.kimi) activeAgentIds = activeAgentIds.filter(x=>x!=="kimi");
-  if(!newKeys.gpt) activeAgentIds = activeAgentIds.filter(x=>x!=="gpt");
   localStorage.setItem("active_agents",JSON.stringify(activeAgentIds));
   // Сохраняем в облако
   if(window.cloudSync) window.cloudSync.saveSettings(newKeys, activeAgentIds).catch(()=>{});
@@ -7343,7 +7180,7 @@ function initApp(){
 
   // Auto-show settings if no keys
   const k=getKeys();
-  if(!k.claude&&!k.gemini&&!k.deepseek&&!k.perplexity&&!k.kimi){
+  if(!k.claude&&!k.gemini&&!k.deepseek&&!k.perplexity){
     setTimeout(showSettings, 500);
   }
 }
