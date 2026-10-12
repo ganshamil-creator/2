@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png"/>
   <script>
     // Глобальный обработчик ошибок — предотвращает чёрный экран
-    window.__BUILD = "2026-10-12-c";
+    window.__BUILD = "2026-10-12-d";
     window.__authFallback = true; // модуль Firebase сбросит в false, когда успешно определит вход
     window.__errLog = [];
     function __logErr(kind, msg){
@@ -621,8 +621,8 @@
       <!-- GPT-4o -->
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-          <span>🟢</span><span style="font-size:11px;font-weight:600;color:#10a779">GPT-4o</span>
-          <span style="font-size:9px;background:#f0fdf4;color:#166534;padding:1px 6px;border-radius:3px;margin-left:auto">Практика + Советы</span>
+          <span>🟢</span><span style="font-size:11px;font-weight:600;color:#10a779">OpenAI</span>
+          <span style="font-size:9px;background:#f0fdf4;color:#166534;padding:1px 6px;border-radius:3px;margin-left:auto">Только голосовой ввод</span>
         </div>
         <input type="password" id="key_gpt" placeholder="sk-proj-..." style="width:100%;padding:7px 10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;color:#1e293b;font-size:12px"/>
         <div style="font-size:10px;color:#6b7280;margin-top:4px">platform.openai.com/api-keys → Create</div>
@@ -1057,10 +1057,6 @@ const ALL_AGENTS = [
    system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."+FILE_EXPORT_NOTE},
   {id:"deepseek",  name:"DeepSeek",   emoji:"⚡", color:"#06b6d4", badge:"V4", tag:"Дешёвый код",
    system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста. ВАЖНО: ты НЕ умеешь видеть прикреплённые изображения/сканы/чертежи напрямую — тебе доступен только извлечённый из них текст (если он есть). Если этого текста недостаточно, чтобы ответить по существу (например, план/чертёж/схема, где важна именно визуальная структура), — прямо и честно скажи, что не можешь увидеть изображение и опираешься только на обрывочный текст, и НЕ придумывай/не угадывай, что может быть на картинке (название чертежа, цифры, схему и т.п.). Ложное уверенное угадывание хуже честного отказа."+FILE_EXPORT_NOTE},
-  {id:"kimi",      name:"Kimi",       emoji:"🔵", color:"#3b82f6", badge:"K3", tag:"Длинные документы",
-   system:"Ты Kimi K3 от Moonshot AI. Специализируешься на креативных задачах, финансовых расчётах и анализе длинных документов. Давай нестандартные практичные решения. Если есть контекст от предыдущих агентов — используй его и дополни своим уникальным взглядом. Используй дату из контекста. Отвечай именно на то, что спросили — не бери на себя лишнюю инициативу и не делай сверх запрошенного без явной просьбы."+FILE_EXPORT_NOTE},
-  {id:"gpt",       name:"GPT-5.6",     emoji:"🟢", color:"#10a779", badge:"Luna", tag:"Практичные советы",
-   system:"Ты GPT-5.6 Luna от OpenAI. Давай практичные пошаговые решения и конкретные рекомендации. Специализируешься на прикладных задачах, инструкциях и советах. Если есть контекст от предыдущих агентов — обогати его практическими советами. Используй дату из контекста."+FILE_EXPORT_NOTE},
 ];
 
 // Fable — раньше был премиальной Claude-моделью уровня Mythos, недоступен для выбора в
@@ -4090,18 +4086,21 @@ async function toggleVoiceRecording(){
     return;
   }
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-    showToast("⚠️ Браузер не поддерживает запись с микрофона");
+    if(typeof __logErr==="function") __logErr("voice", "нет mediaDevices.getUserMedia");
+    alert("Браузер не даёт доступ к микрофону (нужен https и разрешение для сайта).");
     return;
   }
   const gptKey = (typeof getKeys==="function" ? getKeys().gpt : null);
   if(!gptKey){
-    showToast("⚠️ Для голосового ввода нужен ключ OpenAI в ⚙️ Настройки");
+    if(typeof __logErr==="function") __logErr("voice", "нет ключа OpenAI на этом устройстве");
+    alert("Для голосового ввода нужен ключ OpenAI. На этом устройстве его нет: войди в аккаунт (ключи подтянутся из облака) или введи его в ⚙️ Настройки.");
     return;
   }
   try{
     __voiceStream = await navigator.mediaDevices.getUserMedia({audio:true});
   }catch(permErr){
-    showToast("⚠️ Нет доступа к микрофону: "+permErr.message);
+    if(typeof __logErr==="function") __logErr("voice", "getUserMedia: "+(permErr.name||"")+" "+(permErr.message||""));
+    alert("Нет доступа к микрофону: "+(permErr.name||"")+" "+(permErr.message||"")+"\n\nВ Firefox: значок замка слева от адреса → Разрешения → Микрофон → Разрешить. Также проверь разрешение для Firefox в настройках Android.");
     return;
   }
   __voiceChunks = [];
@@ -4129,7 +4128,8 @@ async function toggleVoiceRecording(){
         showToast("⚠️ Не удалось распознать речь");
       }
     }catch(voiceErr){
-      showToast("⚠️ Ошибка распознавания: "+voiceErr.message);
+      if(typeof __logErr==="function") __logErr("voice", "распознавание: "+(voiceErr.message||voiceErr));
+      alert("Ошибка распознавания речи: "+(voiceErr.message||voiceErr));
     }
   };
   __voiceRecorder.start();
@@ -7337,11 +7337,8 @@ function saveSettings(){
   };
   saveKeys(newKeys);
   // Автоматически включаем агентов если введён ключ
-  if(newKeys.kimi && !activeAgentIds.includes("kimi")) activeAgentIds.push("kimi");
-  if(newKeys.gpt && !activeAgentIds.includes("gpt")) activeAgentIds.push("gpt");
   // Отключаем если ключ удалён
-  if(!newKeys.kimi) activeAgentIds = activeAgentIds.filter(x=>x!=="kimi");
-  if(!newKeys.gpt) activeAgentIds = activeAgentIds.filter(x=>x!=="gpt");
+  activeAgentIds = activeAgentIds.filter(x=>x!=="kimi" && x!=="gpt");
   localStorage.setItem("active_agents",JSON.stringify(activeAgentIds));
   // Сохраняем в облако
   if(window.cloudSync) window.cloudSync.saveSettings(newKeys, activeAgentIds).catch(()=>{});
@@ -7370,9 +7367,9 @@ function renderAgentToggles(){
 // ════════════════════════════════════════════════════════════════
 function showToast(msg){
   let t=document.getElementById("toast");
-  if(!t){t=document.createElement("div");t.id="toast";t.style.cssText="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f1f5f9;padding:10px 18px;border-radius:10px;font-size:14px;z-index:300;border:1px solid #374151;box-shadow:0 4px 20px rgba(0,0,0,.5);transition:opacity .3s;white-space:nowrap";document.body.appendChild(t);}
+  if(!t){t=document.createElement("div");t.id="toast";t.style.cssText="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f1f5f9;padding:10px 18px;border-radius:10px;font-size:14px;z-index:300;border:1px solid #374151;box-shadow:0 4px 20px rgba(0,0,0,.5);transition:opacity .3s;white-space:normal;max-width:90vw;text-align:center";document.body.appendChild(t);}
   t.textContent=msg; t.style.opacity="1";
-  clearTimeout(t._t); t._t=setTimeout(()=>t.style.opacity="0",3000);
+  clearTimeout(t._t); t._t=setTimeout(()=>t.style.opacity="0",Math.min(8000,Math.max(3000,String(msg).length*70)));
 }
 
 function toggleSidebar(){
