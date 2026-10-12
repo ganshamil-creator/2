@@ -74,7 +74,11 @@
 
     const firebaseConfig = {
       apiKey: "AIzaSyDsGW3WtnfY9Uv5GDXbVu6c4YJ1OJ9mmmU",
-      authDomain: "ai-hub-21af9.firebaseapp.com",
+      // authDomain = домен самого сайта (а не *.firebaseapp.com): иначе мобильный Firefox/Safari/Chrome
+      // блокируют стороннее хранилище, и результат signInWithRedirect теряется (вход "не завершается").
+      // Требует в Google Cloud Console → OAuth-клиент → Authorized redirect URIs:
+      // https://ai-hub-21af9.web.app/__/auth/handler
+      authDomain: "ai-hub-21af9.web.app",
       projectId: "ai-hub-21af9",
       storageBucket: "ai-hub-21af9.firebasestorage.app",
       messagingSenderId: "223206587851",
