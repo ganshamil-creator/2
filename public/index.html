@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png"/>
   <script>
     // Глобальный обработчик ошибок — предотвращает чёрный экран
-    window.__BUILD = "2026-10-12-a";
+    window.__BUILD = "2026-10-12-c";
     window.__authFallback = true; // модуль Firebase сбросит в false, когда успешно определит вход
     window.__errLog = [];
     function __logErr(kind, msg){
@@ -47,7 +47,7 @@
       b.textContent = "v"+window.__BUILD+(window.__errLog.length? "  ⚠"+window.__errLog.length : "");
       b.onclick = function(){
         alert("Сборка: "+window.__BUILD+"\nМодуль входа Firebase: "+(window.__authFallback?"НЕ загрузился":"загружен")+
-              "\nUA: "+navigator.userAgent+"\n\nЖурнал ошибок:\n"+(window.__errLog.join("\n")||"(пусто)"));
+              "\nauthDomain: "+(window.__authDomain||"?")+"\nUA: "+navigator.userAgent+"\n\nЖурнал ошибок:\n"+(window.__errLog.join("\n")||"(пусто)"));
       };
       document.body.appendChild(b);
     });
@@ -85,6 +85,7 @@
       appId: "1:223206587851:web:3725b7b9d08c7f9fef4a4e"
     };
 
+    window.__authDomain = firebaseConfig.authDomain;
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const auth = getAuth(app);
@@ -138,25 +139,24 @@
     window.__authFallback = false; // реальный модуль входа загрузился
     window.signInWithGoogle = function(){
       provider.setCustomParameters({prompt: "select_account"});
-      // На телефонах popup для OAuth часто либо блокируется браузером, либо открывается
-      // и тут же теряет связь с родительским окном (особенно заметно в Firefox Android/iOS).
-      // На мобильных сразу используем signInWithRedirect — полную перезагрузку страницы
-      // на accounts.google.com и обратно; getRedirectResult() выше уже ждёт этот случай.
-      const isMobileUA = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-      if(isMobileUA){
+      // Сначала пробуем popup на всех устройствах (в том числе на телефоне): теперь authDomain
+      // совпадает с доменом сайта, и popup может вернуть результат без стороннего хранилища.
+      // signInWithRedirect на мобильном Firefox возвращал пустой результат (журнал: "redirect result:
+      // пусто, pending=true"), поэтому он остаётся только запасным вариантом.
+      const _fallbackToRedirect = function(){
         try{ sessionStorage.setItem(_pendingRedirectKey, "1"); }catch(e){}
         signInWithRedirect(auth, provider);
-        return;
-      }
-      // Вызываем signInWithPopup синхронно из обработчика клика
-      // Chrome на Android требует прямой связи popup с user gesture
+      };
+      if(typeof __logErr==="function") __logErr("auth", "signInWithPopup, authDomain="+firebaseConfig.authDomain);
       signInWithPopup(auth, provider).then(function(result){
+        if(typeof __logErr==="function") __logErr("auth", "popup ok: "+(result&&result.user?"user":"?"));
         // onAuthStateChanged обработает автоматически
       }).catch(function(e){
+        if(typeof __logErr==="function") __logErr("auth", "popup error: "+(e.code||"")+" "+(e.message||""));
         if(e.code === "auth/popup-closed-by-user" || e.code === "auth/cancelled-popup-request") return;
-        if(e.code === "auth/popup-blocked"){
-          // Popup заблокирован даже на десктопе — последний резерв: редирект
-          signInWithRedirect(auth, provider);
+        if(e.code === "auth/popup-blocked" || e.code === "auth/operation-not-supported-in-this-environment"){
+          // Popup недоступен — последний резерв: редирект
+          _fallbackToRedirect();
         } else if(e.code === "auth/unauthorized-domain"){
           alert("⚠️ Домен не авторизован в Firebase!");
         } else {
