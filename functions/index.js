@@ -15,6 +15,9 @@
 //    (например, поллинг) были невозможны в принципе — сам вызывающий код на
 //    фронтенде мог просить что угодно, но проксировался всегда как POST.
 //
+//    Дополнительно (14.10.2026): тот же путь принимает {audioBase64, filename, mimeType,
+//    apiKey, model} и пересылает запись в OpenAI Whisper как multipart (голосовой ввод).
+//
 // 2) samsungWebhook — приём данных от HC Webhook (Android-приложение на
 //    телефоне), конвертация формата Health Connect в формат хаба
 //    (wr.steps / wr.heartRate) и сохранение в тот же Firestore-документ,
@@ -87,6 +90,45 @@ exports.proxy = onRequest(
     }
 
     try {
+      // ── Голосовой ввод (Whisper) ───────────────────────────────
+      // Whisper принимает только multipart/form-data, а обычный JSON-режим прокси ниже так не
+      // умеет. Браузер шлёт запись как base64 в {audioBase64, filename, mimeType, apiKey, model},
+      // а multipart-запрос к api.openai.com собираем здесь, на сервере. Это нужно, когда браузер
+      // не может обратиться к api.openai.com напрямую (например, с телефона в России).
+      // Добавлено 14.10.2026.
+      if (req.body && req.body.audioBase64) {
+        const { audioBase64, filename, mimeType, apiKey, model } = req.body;
+        if (typeof audioBase64 !== "string" || !apiKey || typeof apiKey !== "string") {
+          res.status(400).json({ error: { message: "Missing audioBase64 or apiKey" } });
+          return;
+        }
+        const buf = Buffer.from(audioBase64, "base64");
+        if (!buf.length) {
+          res.status(400).json({ error: { message: "Empty audio" } });
+          return;
+        }
+        if (buf.length > 24 * 1024 * 1024) {
+          res.status(413).json({ error: { message: "Audio too large (max 24MB)" } });
+          return;
+        }
+        const form = new FormData();
+        form.append("file", new Blob([buf], { type: mimeType || "audio/webm" }), filename || "voice.webm");
+        form.append("model", model || "whisper-1");
+        const whisperResp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+          method: "POST",
+          headers: { Authorization: "Bearer " + apiKey },
+          body: form
+        });
+        const whisperText = await whisperResp.text();
+        res.status(whisperResp.status);
+        try {
+          res.json(JSON.parse(whisperText));
+        } catch (e) {
+          res.send(whisperText);
+        }
+        return;
+      }
+
       const { url, headers, body, method } = req.body || {};
       if (!url || typeof url !== "string") {
         res.status(400).json({ error: "Missing url" });
