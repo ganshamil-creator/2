@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png"/>
   <script>
     // Глобальный обработчик ошибок — предотвращает чёрный экран
-    window.__BUILD = "2026-10-12-d";
+    window.__BUILD = "2026-10-14-e";
     window.__authFallback = true; // модуль Firebase сбросит в false, когда успешно определит вход
     window.__errLog = [];
     function __logErr(kind, msg){
@@ -4137,191 +4137,284 @@ async function toggleVoiceRecording(){
   showToast("🎙️ Идёт запись... нажми ещё раз, чтобы остановить");
 }
 
+// ── Загрузка файлов: статус каждого файла виден сразу после выбора ──────────────
+// Раньше превью появлялось только после обработки ВСЕХ файлов сразу, обрабатывались они
+// параллельно (OCR/PDF на телефоне вешали друг друга), а ошибка чтения или исключение внутри
+// обработки не давали счётчику дойти до конца — превью не появлялось вообще, а кнопка отправки
+// после неудачного OCR оставалась заблокированной. Теперь: карточка файла появляется сразу
+// (в очереди → читаю → готов / предупреждение / ошибка), файлы обрабатываются по очереди,
+// любая ошибка видна на карточке, а отправка ждёт окончания обработки.
+let fileJobs = [];            // файлы в очереди / в обработке / с ошибкой чтения
+let fileJobSeq = 0;
+let fileQueue = Promise.resolve();
+const FILE_JOB_TIMEOUT_MS = 150000;
+
+function filesBusy(){
+  if(fileJobs.some(j=>j.state==="queued"||j.state==="loading")){
+    showToast("⏳ Подожди — файлы ещё обрабатываются");
+    return true;
+  }
+  return false;
+}
+
+function jobNote(job, msg){
+  job.msg = msg;
+  job.warn = /^(⚠️|❌)/.test(msg);
+  renderFilePreview();
+}
+
+function readFileAsDataUrl(f){
+  return new Promise(function(resolve, reject){
+    const r = new FileReader();
+    r.onload = function(){ resolve(r.result); };
+    r.onerror = function(){ reject(r.error || new Error("не удалось прочитать файл")); };
+    r.readAsDataURL(f);
+  });
+}
+
 function handleFiles(input){
-  const files=Array.from(input.files);
+  const files = Array.from(input.files);
+  // Сбрасываем поле выбора, чтобы можно было выбрать тот же файл ещё раз.
+  // (files — уже копия массива, сброс input.files ей не мешает.)
+  try{ input.value = ""; }catch(e){}
   if(!files.length) return;
   // Файлы НАКАПЛИВАЮТСЯ, а не заменяются — важно для мобильных браузеров (особенно Firefox),
   // где нативный диалог выбора часто не даёт выделить сразу несколько файлов, и пользователь
-  // прикрепляет их по одному через повторные нажатия на 📎. Раньше здесь стояло currentFiles=[],
-  // которое стирало уже прикреплённые файлы при каждом новом открытии диалога — баг именно с
-  // "не получается загрузить больше 1 файла", когда мультивыбор в самом диалоге недоступен.
-  if(currentFiles.length+files.length>10){alert("Максимум 10 файлов (уже прикреплено: "+currentFiles.length+")");return;}
-  document.getElementById("filePreview").style.display="none";
-  let loaded=0;
-  files.forEach(f=>{
-    if(f.size>20*1024*1024){showToast("⚠️ "+f.name+" слишком большой (макс 20MB)");loaded++;if(loaded===files.length)renderFilePreview();return;}
-    const reader=new FileReader();
-    reader.onload=async e=>{
-      let b64=e.target.result.split(",")[1];
-      const obj={name:f.name,type:f.type||"application/octet-stream",b64,size:f.size,text:null};
-      if(f.type.startsWith("image/")){
-        // Сжимаем изображение перед отправкой, чтобы не упереться в лимит 4.5MB у серверного прокси
-        // (актуально для фото прямо с камеры телефона, которые легко весят 5-10+ МБ)
-        try{
-          const compressed = await compressImage(e.target.result, 1600, 0.82);
-          const compressedB64 = compressed.split(",")[1];
-          b64 = compressedB64;
-          obj.b64 = compressedB64;
-          obj.type = "image/jpeg";
-        }catch(compressErr){ /* если сжатие не удалось — отправляем оригинал как раньше */ }
-      }
-      if(f.type==="application/pdf"){
-        showToast("📄 Читаю PDF: "+f.name);
-        const pdfResult=await extractPdfText(b64);
-        const txt=pdfResult.text;
-        if(txt) obj.text=txt;
-        showToast(txt?"✅ PDF прочитан":"⚠️ PDF: текст не извлечён");
-        const claudeKeyForVision=getKeys().claude;
-        // Случай 1: страницы БЕЗ текстового слоя вообще (сканы, дизайнерские карточки) —
-        // рендерим целиком одной картинкой, этого обычно достаточно.
-        if(pdfResult.emptyPages && pdfResult.emptyPages.length){
-          try{
-            showToast("🖼️ Стр. "+pdfResult.emptyPages.join(", ")+" без текста — рендерю как изображение...");
-            const pageImages=await renderPdfPagesAsImages(b64,pdfResult.emptyPages);
-            for(const img of pageImages){
-              currentFiles.push({name:f.name+" — стр."+img.page,type:"image/jpeg",b64:img.b64,size:Math.round(img.b64.length*0.75),text:null});
-              // Платную авто-расшифровку через Claude Vision делаем именно для этих страниц —
-              // текстового слоя у них нет вообще, запасного контекста иначе не будет.
-              if(claudeKeyForVision){
-                const visionTxt=await transcribePageWithVision(claudeKeyForVision,img.b64,"image/jpeg");
-                if(visionTxt) obj.text=(obj.text||"")+"\n--- Стр."+img.page+" (распознано Vision AI) ---\n"+visionTxt;
-              }
-            }
-            if(pageImages.length) showToast("✅ Добавлено "+pageImages.length+" стр. как изображения");
-          }catch(pe){ /* тихо пропускаем, если рендер/распознавание страниц не удался */ }
-        }
-        // Случай 2: чертёж крупного формата (drawingPages, см. extractPdfText) — целиком одной
-        // картинкой мелкий текст/размеры не разобрать (vision-API сами сжимают картинку перед
-        // анализом), поэтому режем на тайлы через renderDrawingPageTiles — каждый тайл остаётся
-        // читаемым. Платную Vision-расшифровку сюда не гоняем: тайлов может быть много (до 12 на
-        // файл), это будет дорого — саму картинку(и) разберёт агент, отвечающий на вопрос.
-        if(pdfResult.drawingPages && pdfResult.drawingPages.length){
-          try{
-            showToast("🖼️ Стр. "+pdfResult.drawingPages.join(", ")+" — чертёж крупного формата, режу на тайлы...");
-            const tiles=await renderDrawingPageTiles(b64,pdfResult.drawingPages);
-            for(const tile of tiles){
-              currentFiles.push({name:f.name+" — стр."+tile.page+", "+tile.tileLabel,type:"image/jpeg",b64:tile.b64,size:Math.round(tile.b64.length*0.75),text:null});
-            }
-            if(tiles.length) showToast("✅ Добавлено "+tiles.length+" тайлов чертежа — агент с vision разберёт их напрямую");
-          }catch(pe){ /* тихо пропускаем, если рендер тайлов не удался */ }
-        }
-      } else if(f.type.startsWith("image/")){
-        const sendBtn=document.getElementById("sendBtn");
-        if(sendBtn){sendBtn.disabled=true;sendBtn.textContent="⏳";sendBtn.style.background="#374151";}
-        showToast("🔍 OCR: "+f.name);
-        const txt=await extractImageTextOCR(b64,f.type);
-        if(txt) obj.text="[OCR текст]\n"+txt;
-        if(sendBtn){sendBtn.disabled=false;sendBtn.textContent="↑";sendBtn.style.background="linear-gradient(135deg,#6366f1,#8b5cf6)";}
-        showToast(txt?"✅ OCR: "+txt.length+" символов":"⚠️ Текст не распознан (визуальный анализ через AI)");
-      } else if(f.name.endsWith(".docx")||f.type==="application/vnd.openxmlformats-officedocument.wordprocessingml.document"){
-        // Читаем DOCX через mammoth
-        showToast("📄 Читаю DOCX: "+f.name);
-        try{
-          if(window.mammoth){
-            const arrBuf=await f.arrayBuffer();
-            const result=await mammoth.extractRawText({arrayBuffer:arrBuf});
-            if(result.value && result.value.length>10){
-              obj.text=result.value;
-              showToast("✅ DOCX прочитан: "+result.value.length+" символов");
-            } else {
-              showToast("⚠️ DOCX: текст не извлечён");
-            }
-          } else {
-            // Mammoth не загружен — пробуем base64 decode
-            try{ obj.text = decodeURIComponent(escape(atob(b64))); }catch(e){}
-            showToast("⚠️ Mammoth не загружен — частичное чтение");
-          }
-        }catch(docxErr){ showToast("⚠️ Ошибка чтения DOCX: "+docxErr.message); }
-      } else if(f.name.endsWith(".doc")||f.type==="application/msword"){
-        showToast("⚠️ Формат .doc не поддерживается. Сохрани как .docx");
-      } else if(f.name.endsWith(".pptx")||f.type==="application/vnd.openxmlformats-officedocument.presentationml.presentation"){
-        // Читаем PPTX как ZIP-архив через JSZip, вытаскиваем текст из XML каждого слайда
-        showToast("📽️ Читаю PPTX: "+f.name);
-        try{
-          if(window.JSZip){
-            const arrBuf=await f.arrayBuffer();
-            const zip=await JSZip.loadAsync(arrBuf);
-            const slideFiles=Object.keys(zip.files)
-              .filter(n=>/^ppt\/slides\/slide\d+\.xml$/.test(n))
-              .sort((a,b)=>{
-                const na=parseInt(a.match(/(\d+)/)[1],10), nb=parseInt(b.match(/(\d+)/)[1],10);
-                return na-nb;
-              });
-            let text="";
-            for(let i=0;i<slideFiles.length;i++){
-              const xml=await zip.files[slideFiles[i]].async("text");
-              // Текстовые куски лежат в тегах <a:t>...</a:t>
-              const matches=[...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m=>m[1]);
-              const slideText=matches.join(" ").replace(/\s+/g," ").trim();
-              if(slideText) text+="[Слайд "+(i+1)+"]\n"+slideText+"\n\n";
-            }
-            // Заметки к слайдам (speaker notes) — тоже полезны для контекста
-            const notesFiles=Object.keys(zip.files).filter(n=>/^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(n));
-            for(const nf of notesFiles){
-              const xml=await zip.files[nf].async("text");
-              const matches=[...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m=>m[1]);
-              const noteText=matches.join(" ").replace(/\s+/g," ").trim();
-              if(noteText) text+="[Заметки к слайду]\n"+noteText+"\n\n";
-            }
-            if(text.trim().length>5){
-              obj.text=text.slice(0,20000);
-              showToast("✅ PPTX прочитан: "+slideFiles.length+" слайдов");
-            } else {
-              showToast("⚠️ PPTX: текст не найден (возможно, только изображения/графика)");
-            }
-          } else {
-            showToast("⚠️ JSZip не загружен — PPTX не прочитан");
-          }
-        }catch(pptxErr){ showToast("⚠️ Ошибка чтения PPTX: "+pptxErr.message); }
-      } else if(f.type.startsWith("audio/")||/\.(mp3|mp4|mpeg|mpga|m4a|wav|webm)$/i.test(f.name)){
-        // Whisper (OpenAI) официально принимает только: mp3, mp4, mpeg, mpga, m4a, wav, webm.
-        // Форматы вроде .ogg/.opus/.amr/.3gp (частые для голосовых с телефона) им не поддерживаются —
-        // такие файлы просто не попадают в эту ветку и не тратят впустую вызов API.
-        showToast("🎙️ Распознаю аудио: "+f.name);
-        try{
-          const audioBlob = new Blob([Uint8Array.from(atob(b64),c=>c.charCodeAt(0))], {type:f.type||"audio/mpeg"});
-          const text = await transcribeWithWhisper(audioBlob, f.name, f.type||"audio/mpeg");
-          if(text){
-            obj.text = "[Расшифровка аудио \""+f.name+"\"]\n"+text;
-            showToast("✅ Аудио распознано ("+text.length+" симв.)");
-          } else {
-            showToast("⚠️ Не удалось распознать речь в аудио");
-          }
-        }catch(audioErr){ showToast("⚠️ Ошибка распознавания аудио: "+audioErr.message); }
-      } else if(f.name.endsWith(".xlsx")||f.name.endsWith(".xls")||
-                f.type==="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"||
-                f.type==="application/vnd.ms-excel"){
-        // Читаем Excel через SheetJS
-        showToast("📊 Читаю Excel: "+f.name);
-        try{
-          if(window.XLSX){
-            const arrBuf=await f.arrayBuffer();
-            const wb=XLSX.read(arrBuf,{type:"array"});
-            let text="";
-            wb.SheetNames.forEach(function(sheetName){
-              const ws=wb.Sheets[sheetName];
-              const csv=XLSX.utils.sheet_to_csv(ws,{blankrows:false});
-              if(csv.trim()) text+="[Лист: "+sheetName+"]\n"+csv+"\n\n";
-            });
-            if(text.trim().length>10){
-              obj.text=text.slice(0,15000); // ограничиваем контекст
-              showToast("✅ Excel прочитан: "+wb.SheetNames.length+" листов");
-            } else {
-              showToast("⚠️ Excel: данные не извлечены");
-            }
-          } else {
-            showToast("⚠️ XLSX библиотека не загружена");
-          }
-        }catch(xlsxErr){ showToast("⚠️ Ошибка чтения Excel: "+xlsxErr.message); }
-      } else if(f.type.startsWith("text/")||/\.(txt|md|csv|py|js|jsx|ts|tsx|json|html|htm|css|scss|java|c|cpp|h|hpp|go|rb|php|sql|yaml|yml|sh|bash|xml|log|ini|toml|env|gitignore|dockerfile|rs|kt|swift|r|m)$/i.test(f.name)){
-        try{obj.text=atob(b64);}catch(e){}
-      }
-      currentFiles.push(obj);
-      loaded++;
-      if(loaded===files.length) renderFilePreview();
-    };
-    reader.readAsDataURL(f);
+  // прикрепляет их по одному через повторные нажатия на 📎.
+  const active = fileJobs.filter(j=>j.state==="queued"||j.state==="loading").length;
+  if(currentFiles.length+active+files.length>10){
+    alert("Максимум 10 файлов (уже прикреплено: "+(currentFiles.length+active)+")");
+    return;
+  }
+  files.forEach(function(f){
+    if(f.size>20*1024*1024){
+      fileJobs.push({id:++fileJobSeq,name:f.name,size:f.size,state:"error",msg:"❌ Слишком большой (макс 20 МБ)"});
+      return;
+    }
+    const dup = currentFiles.some(x=>x.name===f.name&&x.size===f.size) ||
+                fileJobs.some(j=>j.name===f.name&&j.size===f.size&&j.state!=="error");
+    if(dup){ showToast("ℹ️ «"+f.name+"» уже прикреплён"); return; }
+    const job = {id:++fileJobSeq,name:f.name,size:f.size,state:"queued",msg:"В очереди…"};
+    fileJobs.push(job);
+    fileQueue = fileQueue.then(function(){ return runFileJob(f, job); });
   });
+  renderFilePreview();
+}
+
+async function runFileJob(f, job){
+  if(job.cancelled) return;
+  job.state = "loading";
+  jobNote(job, "Читаю файл…");
+  let timer;
+  try{
+    const dataUrl = await readFileAsDataUrl(f);
+    if(job.cancelled) return;
+    const timeout = new Promise(function(_, reject){
+      timer = setTimeout(function(){ reject(new Error("TIMEOUT")); }, FILE_JOB_TIMEOUT_MS);
+    });
+    let obj = null;
+    try{
+      obj = await Promise.race([processFileJob(f, dataUrl, job), timeout]);
+    }catch(procErr){
+      // Сам файл уже прочитан — даже если обработка (OCR/PDF/...) упала или зависла,
+      // прикрепляем файл как есть, но с видимым предупреждением, а не теряем его молча.
+      obj = job.obj;
+      if(!obj) throw procErr;
+      job.abandoned = true;
+      jobNote(job, (procErr && procErr.message==="TIMEOUT")
+        ? "⚠️ Обработка заняла слишком долго — файл добавлен без извлечённого текста"
+        : "⚠️ Ошибка обработки ("+(procErr && procErr.message || procErr)+") — файл добавлен как есть");
+    }
+    if(job.cancelled) return;
+    obj.statusState = job.warn ? "warn" : "done";
+    obj.statusMsg = (job.msg && job.msg!=="Читаю файл…") ? job.msg : "✅ Готов";
+    currentFiles.push(obj);
+    fileJobs = fileJobs.filter(function(j){ return j!==job; });
+  }catch(err){
+    job.state = "error";
+    job.msg = "❌ "+(err && err.message || err);
+  }finally{
+    clearTimeout(timer);
+    renderFilePreview();
+  }
+}
+
+async function processFileJob(f, dataUrl, job){
+  let b64=dataUrl.split(",")[1];
+  const obj={name:f.name,type:f.type||"application/octet-stream",b64,size:f.size,text:null};
+  job.obj=obj;
+  if(f.type.startsWith("image/")){
+    // Сжимаем изображение перед отправкой, чтобы не упереться в лимит 4.5MB у серверного прокси
+    // (актуально для фото прямо с камеры телефона, которые легко весят 5-10+ МБ)
+    try{
+      const compressed = await compressImage(dataUrl, 1600, 0.82);
+      const compressedB64 = compressed.split(",")[1];
+      b64 = compressedB64;
+      obj.b64 = compressedB64;
+      obj.type = "image/jpeg";
+    }catch(compressErr){ /* если сжатие не удалось — отправляем оригинал как раньше */ }
+  }
+  if(f.type==="application/pdf"){
+    jobNote(job,"📄 Читаю PDF: "+f.name);
+    const pdfResult=await extractPdfText(b64);
+    const txt=pdfResult.text;
+    if(txt) obj.text=txt;
+    jobNote(job,txt?"✅ PDF прочитан":"⚠️ PDF: текст не извлечён");
+    const claudeKeyForVision=getKeys().claude;
+    // Случай 1: страницы БЕЗ текстового слоя вообще (сканы, дизайнерские карточки) —
+    // рендерим целиком одной картинкой, этого обычно достаточно.
+    if(pdfResult.emptyPages && pdfResult.emptyPages.length){
+      try{
+        jobNote(job,"🖼️ Стр. "+pdfResult.emptyPages.join(", ")+" без текста — рендерю как изображение...");
+        const pageImages=await renderPdfPagesAsImages(b64,pdfResult.emptyPages);
+        for(const img of pageImages){
+          if(job.abandoned||job.cancelled) break;
+          currentFiles.push({name:f.name+" — стр."+img.page,type:"image/jpeg",b64:img.b64,size:Math.round(img.b64.length*0.75),text:null});
+          // Платную авто-расшифровку через Claude Vision делаем именно для этих страниц —
+          // текстового слоя у них нет вообще, запасного контекста иначе не будет.
+          if(claudeKeyForVision){
+            const visionTxt=await transcribePageWithVision(claudeKeyForVision,img.b64,"image/jpeg");
+            if(visionTxt) obj.text=(obj.text||"")+"\n--- Стр."+img.page+" (распознано Vision AI) ---\n"+visionTxt;
+          }
+        }
+        if(pageImages.length) jobNote(job,"✅ Добавлено "+pageImages.length+" стр. как изображения");
+      }catch(pe){ /* тихо пропускаем, если рендер/распознавание страниц не удался */ }
+    }
+    // Случай 2: чертёж крупного формата (drawingPages, см. extractPdfText) — целиком одной
+    // картинкой мелкий текст/размеры не разобрать (vision-API сами сжимают картинку перед
+    // анализом), поэтому режем на тайлы через renderDrawingPageTiles — каждый тайл остаётся
+    // читаемым. Платную Vision-расшифровку сюда не гоняем: тайлов может быть много (до 12 на
+    // файл), это будет дорого — саму картинку(и) разберёт агент, отвечающий на вопрос.
+    if(pdfResult.drawingPages && pdfResult.drawingPages.length){
+      try{
+        jobNote(job,"🖼️ Стр. "+pdfResult.drawingPages.join(", ")+" — чертёж крупного формата, режу на тайлы...");
+        const tiles=await renderDrawingPageTiles(b64,pdfResult.drawingPages);
+        for(const tile of tiles){
+          if(job.abandoned||job.cancelled) break;
+          currentFiles.push({name:f.name+" — стр."+tile.page+", "+tile.tileLabel,type:"image/jpeg",b64:tile.b64,size:Math.round(tile.b64.length*0.75),text:null});
+        }
+        if(tiles.length) jobNote(job,"✅ Добавлено "+tiles.length+" тайлов чертежа — агент с vision разберёт их напрямую");
+      }catch(pe){ /* тихо пропускаем, если рендер тайлов не удался */ }
+    }
+  } else if(f.type.startsWith("image/")){
+    jobNote(job,"🔍 Распознаю текст на изображении (OCR)…");
+    let txt="";
+    try{ txt=await extractImageTextOCR(b64,f.type); }catch(ocrErr){ txt=""; }
+    if(txt) obj.text="[OCR текст]\n"+txt;
+    jobNote(job, txt ? "✅ OCR: "+txt.length+" симв." : "ℹ️ Текста на изображении нет — его разберёт AI напрямую");
+  } else if(f.name.endsWith(".docx")||f.type==="application/vnd.openxmlformats-officedocument.wordprocessingml.document"){
+    // Читаем DOCX через mammoth
+    jobNote(job,"📄 Читаю DOCX: "+f.name);
+    try{
+      if(window.mammoth){
+        const arrBuf=await f.arrayBuffer();
+        const result=await mammoth.extractRawText({arrayBuffer:arrBuf});
+        if(result.value && result.value.length>10){
+          obj.text=result.value;
+          jobNote(job,"✅ DOCX прочитан: "+result.value.length+" символов");
+        } else {
+          jobNote(job,"⚠️ DOCX: текст не извлечён");
+        }
+      } else {
+        // Mammoth не загружен — пробуем base64 decode
+        try{ obj.text = decodeURIComponent(escape(atob(b64))); }catch(e){}
+        jobNote(job,"⚠️ Mammoth не загружен — частичное чтение");
+      }
+    }catch(docxErr){ jobNote(job,"⚠️ Ошибка чтения DOCX: "+docxErr.message); }
+  } else if(f.name.endsWith(".doc")||f.type==="application/msword"){
+    jobNote(job,"⚠️ Формат .doc не поддерживается. Сохрани как .docx");
+  } else if(f.name.endsWith(".pptx")||f.type==="application/vnd.openxmlformats-officedocument.presentationml.presentation"){
+    // Читаем PPTX как ZIP-архив через JSZip, вытаскиваем текст из XML каждого слайда
+    jobNote(job,"📽️ Читаю PPTX: "+f.name);
+    try{
+      if(window.JSZip){
+        const arrBuf=await f.arrayBuffer();
+        const zip=await JSZip.loadAsync(arrBuf);
+        const slideFiles=Object.keys(zip.files)
+          .filter(n=>/^ppt\/slides\/slide\d+\.xml$/.test(n))
+          .sort((a,b)=>{
+            const na=parseInt(a.match(/(\d+)/)[1],10), nb=parseInt(b.match(/(\d+)/)[1],10);
+            return na-nb;
+          });
+        let text="";
+        for(let i=0;i<slideFiles.length;i++){
+          const xml=await zip.files[slideFiles[i]].async("text");
+          // Текстовые куски лежат в тегах <a:t>...</a:t>
+          const matches=[...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m=>m[1]);
+          const slideText=matches.join(" ").replace(/\s+/g," ").trim();
+          if(slideText) text+="[Слайд "+(i+1)+"]\n"+slideText+"\n\n";
+        }
+        // Заметки к слайдам (speaker notes) — тоже полезны для контекста
+        const notesFiles=Object.keys(zip.files).filter(n=>/^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(n));
+        for(const nf of notesFiles){
+          const xml=await zip.files[nf].async("text");
+          const matches=[...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m=>m[1]);
+          const noteText=matches.join(" ").replace(/\s+/g," ").trim();
+          if(noteText) text+="[Заметки к слайду]\n"+noteText+"\n\n";
+        }
+        if(text.trim().length>5){
+          obj.text=text.slice(0,20000);
+          jobNote(job,"✅ PPTX прочитан: "+slideFiles.length+" слайдов");
+        } else {
+          jobNote(job,"⚠️ PPTX: текст не найден (возможно, только изображения/графика)");
+        }
+      } else {
+        jobNote(job,"⚠️ JSZip не загружен — PPTX не прочитан");
+      }
+    }catch(pptxErr){ jobNote(job,"⚠️ Ошибка чтения PPTX: "+pptxErr.message); }
+  } else if(f.type.startsWith("audio/")||/\.(mp3|mp4|mpeg|mpga|m4a|wav|webm)$/i.test(f.name)){
+    // Whisper (OpenAI) официально принимает только: mp3, mp4, mpeg, mpga, m4a, wav, webm.
+    // Форматы вроде .ogg/.opus/.amr/.3gp (частые для голосовых с телефона) им не поддерживаются —
+    // такие файлы просто не попадают в эту ветку и не тратят впустую вызов API.
+    jobNote(job,"🎙️ Распознаю аудио: "+f.name);
+    try{
+      const audioBlob = new Blob([Uint8Array.from(atob(b64),c=>c.charCodeAt(0))], {type:f.type||"audio/mpeg"});
+      const text = await transcribeWithWhisper(audioBlob, f.name, f.type||"audio/mpeg");
+      if(text){
+        obj.text = "[Расшифровка аудио \""+f.name+"\"]\n"+text;
+        jobNote(job,"✅ Аудио распознано ("+text.length+" симв.)");
+      } else {
+        jobNote(job,"⚠️ Не удалось распознать речь в аудио");
+      }
+    }catch(audioErr){ jobNote(job,"⚠️ Ошибка распознавания аудио: "+audioErr.message); }
+  } else if(f.name.endsWith(".xlsx")||f.name.endsWith(".xls")||
+            f.type==="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"||
+            f.type==="application/vnd.ms-excel"){
+    // Читаем Excel через SheetJS
+    jobNote(job,"📊 Читаю Excel: "+f.name);
+    try{
+      if(window.XLSX){
+        const arrBuf=await f.arrayBuffer();
+        const wb=XLSX.read(arrBuf,{type:"array"});
+        let text="";
+        wb.SheetNames.forEach(function(sheetName){
+          const ws=wb.Sheets[sheetName];
+          const csv=XLSX.utils.sheet_to_csv(ws,{blankrows:false});
+          if(csv.trim()) text+="[Лист: "+sheetName+"]\n"+csv+"\n\n";
+        });
+        if(text.trim().length>10){
+          obj.text=text.slice(0,15000); // ограничиваем контекст
+          jobNote(job,"✅ Excel прочитан: "+wb.SheetNames.length+" листов");
+        } else {
+          jobNote(job,"⚠️ Excel: данные не извлечены");
+        }
+      } else {
+        jobNote(job,"⚠️ XLSX библиотека не загружена");
+      }
+    }catch(xlsxErr){ jobNote(job,"⚠️ Ошибка чтения Excel: "+xlsxErr.message); }
+  } else if(f.type.startsWith("text/")||/\.(txt|md|csv|py|js|jsx|ts|tsx|json|html|htm|css|scss|java|c|cpp|h|hpp|go|rb|php|sql|yaml|yml|sh|bash|xml|log|ini|toml|env|gitignore|dockerfile|rs|kt|swift|r|m)$/i.test(f.name)){
+    try{obj.text=atob(b64);}catch(e){}
+    jobNote(job, obj.text ? "✅ Прочитан ("+obj.text.length+" симв.)" : "⚠️ Не удалось прочитать как текст");
+  }
+  return obj;
+}
+
+function removeJob(id){
+  const j = fileJobs.find(function(x){ return x.id===id; });
+  if(j) j.cancelled = true;
+  fileJobs = fileJobs.filter(function(x){ return x.id!==id; });
+  if(!currentFiles.length && !fileJobs.length){ document.getElementById("fileInput").value=""; }
+  renderFilePreview();
 }
 
 function detectMedDocType(filename, text){
@@ -4838,28 +4931,46 @@ async function extractBiomarkersWithAI(apiKey, filename, text, docType, cardId){
   }
 }
 
+function fileStatusHtml(state, msg){
+  const color = state==="done" ? "#16a34a" : state==="warn" ? "#b45309" : state==="error" ? "#dc2626" : "#6366f1";
+  const pulse = (state==="queued"||state==="loading") ? " class='pulse'" : "";
+  return "<div"+pulse+" style='font-size:10px;color:"+color+";white-space:normal;word-break:break-word'>"+escHtml(msg||"")+"</div>";
+}
+
 function renderFilePreview(){
   const p=document.getElementById("filePreview");
-  if(!currentFiles.length){p.style.display="none";p.innerHTML="";return;}
+  if(!currentFiles.length && !fileJobs.length){p.style.display="none";p.innerHTML="";return;}
   p.style.display="flex";
-  const rows=currentFiles.map((f,i)=>{
-    const icon=f.type.startsWith("image/")?"🖼️":f.type==="application/pdf"?"📄":f.type.includes("word")?"📝":f.type.includes("sheet")?"📊":"📎";
-    return "<div style='display:flex;align-items:center;gap:8px'>"
+  const fileIcon=function(type){
+    type=type||"";
+    return type.startsWith("image/")?"🖼️":type==="application/pdf"?"📄":type.includes("word")?"📝":type.includes("sheet")?"📊":"📎";
+  };
+  const rowHtml=function(icon,name,size,statusHtml,removeCall){
+    return "<div style='display:flex;align-items:flex-start;gap:8px'>"
       +"<span style='font-size:18px;flex-shrink:0'>"+icon+"</span>"
       +"<div style='flex:1;min-width:0'>"
-        +"<div style='font-size:12px;font-weight:600;color:#4f46e5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>"+escHtml(f.name)+"</div>"
-        +"<div style='font-size:10px;color:#6b7280'>"+(f.size/1024).toFixed(0)+" KB</div>"
+        +"<div style='font-size:12px;font-weight:600;color:#4f46e5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>"+escHtml(name)+"</div>"
+        +"<div style='font-size:10px;color:#6b7280'>"+(size/1024).toFixed(0)+" KB</div>"
+        +statusHtml
       +"</div>"
-      +"<button onclick='removeFile("+i+")' title='Удалить файл' style='background:none;border:none;color:#6b7280;cursor:pointer;font-size:16px;flex-shrink:0;padding:0 2px'>✕</button>"
+      +"<button onclick='"+removeCall+"' title='Удалить файл' style='background:none;border:none;color:#6b7280;cursor:pointer;font-size:16px;flex-shrink:0;padding:0 2px'>✕</button>"
     +"</div>";
+  };
+  const readyRows=currentFiles.map(function(f,i){
+    return rowHtml(fileIcon(f.type), f.name, f.size,
+      f.statusMsg ? fileStatusHtml(f.statusState||"done", f.statusMsg) : "", "removeFile("+i+")");
   }).join("");
-  const clearAll=currentFiles.length>1
-    ? "<button onclick='clearFiles()' style='align-self:flex-end;background:none;border:none;color:#94a3b8;font-size:11px;cursor:pointer;text-decoration:underline;padding:0'>Очистить все ("+currentFiles.length+")</button>"
+  const jobRows=fileJobs.map(function(j){
+    return rowHtml("⏳", j.name, j.size, fileStatusHtml(j.warn?"warn":j.state, j.msg), "removeJob("+j.id+")");
+  }).join("");
+  const total=currentFiles.length+fileJobs.length;
+  const clearAll=total>1
+    ? "<button onclick='clearFiles()' style='align-self:flex-end;background:none;border:none;color:#94a3b8;font-size:11px;cursor:pointer;text-decoration:underline;padding:0'>Очистить все ("+total+")</button>"
     : "";
   // Предупреждение о DeepSeek: он не умеет видеть изображения (только текст, см. callDeepSeek).
   // Если сейчас реально может ответить ИМЕННО и ТОЛЬКО DeepSeek (Быстрый режим с ним выбранным),
   // предупреждаем заранее, а не постфактум, когда придёт выдуманный ответ.
-  const hasImages=currentFiles.some(f=>f.type.startsWith("image/")||f.type==="application/pdf");
+  const hasImages=currentFiles.some(f=>(f.type||"").startsWith("image/")||f.type==="application/pdf");
   let visionWarning="";
   if(hasImages){
     const quickSel=document.getElementById("quickAgent");
@@ -4867,17 +4978,19 @@ function renderFilePreview(){
       visionWarning="<div style='font-size:11px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 8px'>⚠️ DeepSeek не видит изображения/чертежи — только извлечённый текст. Для этого файла выбери другого агента.</div>";
     }
   }
-  p.innerHTML=rows+clearAll+visionWarning;
+  p.innerHTML=readyRows+jobRows+clearAll+visionWarning;
 }
 
 function removeFile(i){
   currentFiles.splice(i,1);
-  if(!currentFiles.length){document.getElementById("fileInput").value="";}
+  if(!currentFiles.length && !fileJobs.length){document.getElementById("fileInput").value="";}
   renderFilePreview();
 }
 
 function clearFiles(){
   currentFiles=[];
+  fileJobs.forEach(function(j){ j.cancelled=true; });
+  fileJobs=[];
   document.getElementById("fileInput").value="";
   document.getElementById("filePreview").style.display="none";
   document.getElementById("filePreview").innerHTML="";
@@ -5187,6 +5300,7 @@ async function sendQuick(text, inp){
 // 🏃 ВАРИАНТ В — ПЕРВЫЙ ОТВЕТИВШИЙ
 // ════════════════════════════════════════════════════════════════
 async function sendFirst(){
+  if(filesBusy()) return;
   if(thinking) return;
   const inp=document.getElementById("queryInput");
   const text=inp.value.trim();
@@ -5484,6 +5598,7 @@ async function sendChain(text, inp){
 // MODE PICKER — попап выбора режима при отправке
 // ════════════════════════════════════════════════════════════════
 function showModePicker(){
+  if(filesBusy()) return;
   if(thinking) return;
   const inp=document.getElementById("queryInput");
   const text=inp.value.trim();
@@ -5517,6 +5632,7 @@ function pickMode(mode){
 }
 
 async function send(){
+  if(filesBusy()) return;
   if(thinking) return;
   const inp=document.getElementById("queryInput");
   const text=inp.value.trim();
