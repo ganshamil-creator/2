@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png"/>
   <script>
     // Глобальный обработчик ошибок — предотвращает чёрный экран
-    window.__BUILD = "2026-10-17-f";
+    window.__BUILD = "2026-10-17-g";
     window.__authFallback = true; // модуль Firebase сбросит в false, когда успешно определит вход
     window.__errLog = [];
     function __logErr(kind, msg){
@@ -1056,7 +1056,7 @@ const ALL_AGENTS = [
   {id:"perplexity",name:"Perplexity", emoji:"🟣", color:"#8b5cf6", badge:"Agent API", tag:"Веб-поиск",
    system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."+FILE_EXPORT_NOTE},
   {id:"deepseek",  name:"DeepSeek",   emoji:"⚡", color:"#06b6d4", badge:"V4", tag:"Дешёвый код",
-   system:"Ты DeepSeek V4.1 Flash. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста. ВАЖНО: ты НЕ умеешь видеть прикреплённые изображения/сканы/чертежи напрямую — тебе доступен только извлечённый из них текст (если он есть). Если этого текста недостаточно, чтобы ответить по существу (например, план/чертёж/схема, где важна именно визуальная структура), — прямо и честно скажи, что не можешь увидеть изображение и опираешься только на обрывочный текст, и НЕ придумывай/не угадывай, что может быть на картинке (название чертежа, цифры, схему и т.п.). Ложное уверенное угадывание хуже честного отказа."+FILE_EXPORT_NOTE},
+   system:"Ты DeepSeek V4.1 Flash. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста. Ты умеешь видеть прикреплённые изображения, сканы и чертежи. Если деталь на изображении не читается — прямо скажи об этом и НЕ придумывай цифры и подписи."+FILE_EXPORT_NOTE},
 ];
 
 // Fable — раньше был премиальной Claude-моделью уровня Mythos, недоступен для выбора в
@@ -3665,7 +3665,12 @@ async function callDeepSeek(key, system, history, onChunk){
       // 16.08.2026, когда перед каждой картинкой добавляется подпись [Изображение: ...],
       // .find() находил бы только первую подпись, а настоящий вопрос пользователя (он всегда
       // последним текстовым блоком) терялся бы полностью.
-      if(Array.isArray(m.content)) return {role:m.role,content:m.content.filter(c=>c.type==="text").map(c=>c.text).join("\n")||""};
+      // С 17.10.2026 (DeepSeek V4.1 Flash — нативно мультимодальная, формат image_url + base64
+      // data URL, картинки только в user-сообщениях): для user оставляем text и image_url блоки.
+      if(Array.isArray(m.content)){
+        if(m.role==="user" && m.content.some(c=>c.type==="image_url")) return {role:m.role,content:m.content.filter(c=>c.type==="text"||c.type==="image_url")};
+        return {role:m.role,content:m.content.filter(c=>c.type==="text").map(c=>c.text).join("\n")||""};
+      }
       return m;
     });
     const stream=!isMobile;
@@ -4939,17 +4944,7 @@ function renderFilePreview(){
   const clearAll=total>1
     ? "<button onclick='clearFiles()' style='align-self:flex-end;background:none;border:none;color:#94a3b8;font-size:11px;cursor:pointer;text-decoration:underline;padding:0'>Очистить все ("+total+")</button>"
     : "";
-  // Предупреждение о DeepSeek: он не умеет видеть изображения (только текст, см. callDeepSeek).
-  // Если сейчас реально может ответить ИМЕННО и ТОЛЬКО DeepSeek (Быстрый режим с ним выбранным),
-  // предупреждаем заранее, а не постфактум, когда придёт выдуманный ответ.
-  const hasImages=currentFiles.some(f=>(f.type||"").startsWith("image/")||f.type==="application/pdf");
-  let visionWarning="";
-  if(hasImages){
-    const quickSel=document.getElementById("quickAgent");
-    if(quickMode && quickSel && quickSel.value==="deepseek"){
-      visionWarning="<div style='font-size:11px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 8px'>⚠️ DeepSeek не видит изображения/чертежи — только извлечённый текст. Для этого файла выбери другого агента.</div>";
-    }
-  }
+  const visionWarning="";
   p.innerHTML=readyRows+jobRows+clearAll+visionWarning;
 }
 
@@ -5191,16 +5186,13 @@ async function sendQuick(text, inp){
       imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
       content.push({type:"text",text:enrichedMsg});
       agentHistory=[...history.slice(0,-1),{role:"user",content}];
-    } else if(["gpt","gemini","perplexity","kimi"].includes(agentId)){
+    } else if(["gpt","gemini","perplexity","kimi","deepseek"].includes(agentId)){
       const content=[];
       imageFiles.forEach(f=>{content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}});});
       content.push({type:"text",text:enrichedMsg});
       agentHistory=[...history.slice(0,-1),{role:"user",content}];
     }
-    // DeepSeek не поддерживает изображения — только текст/OCR
-    else if(agentId==="deepseek"){
-      showToast("⚠️ DeepSeek не умеет распознавать изображения — переключись на GLM/Gemini/GPT/Perplexity/Kimi, если нужно прочитать фото");
-    }
+
   }
 
   // UI
@@ -5357,7 +5349,7 @@ async function sendFirst(){
           const content=[{type:"text",text:lastMsg.content}];
           imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
           agentHistory=[...agentHistory.slice(0,-1),{role:"user",content}];
-        } else if(["gemini","gpt","perplexity","kimi"].includes(a.id)){
+        } else if(["gemini","gpt","perplexity","kimi","deepseek"].includes(a.id)){
           const content=[];
           imageFiles.forEach(f=>{content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}});});
           content.push({type:"text",text:lastMsg.content});
@@ -5439,7 +5431,7 @@ async function sendChain(text, inp){
     container.insertBefore(bar,container.firstChild);
   }
 
-  const visionSet=new Set(["claude","gemini","perplexity","gpt","kimi"]);
+  const visionSet=new Set(["claude","gemini","perplexity","gpt","kimi","deepseek"]);
   function makeVisionHistoryFor(a, baseHistory, msgText){
     if(!imageFiles.length) return [...baseHistory.slice(0,-1),{role:"user",content:today+msgText}];
     if(a.id==="claude"){
@@ -5792,7 +5784,7 @@ async function send(){
   appendTurnContainer(turnId,agents,cols);
 
   const results={};
-  const visionSet=new Set(["claude","gemini","perplexity","gpt","kimi"]);
+  const visionSet=new Set(["claude","gemini","perplexity","gpt","kimi","deepseek"]);
 
   // Функция создания onChunk для агента — показывает стрим в карточке
   function makeChunkHandler(a){
