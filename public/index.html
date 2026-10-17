@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png"/>
   <script>
     // Глобальный обработчик ошибок — предотвращает чёрный экран
-    window.__BUILD = "2026-10-14-e";
+    window.__BUILD = "2026-10-17-f";
     window.__authFallback = true; // модуль Firebase сбросит в false, когда успешно определит вход
     window.__errLog = [];
     function __logErr(kind, msg){
@@ -1051,12 +1051,12 @@ const FILE_EXPORT_NOTE = " В приложении есть кнопки экс�
 const ALL_AGENTS = [
   {id:"claude",    name:"GLM-5.3-Flash", emoji:"🟠", color:"#d97706", badge:"Z.ai", tag:"Дёшево + зрение",
    system:"Ты GLM-5.3-Flash от Zhipu AI (Z.ai). Давай аналитические глубокие ответы. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения. Помни историю разговора. Если в сообщении пользователя есть блок АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ИНТЕРНЕТА — используй их как главный источник фактов, они получены из веб-поиска прямо сейчас."+FILE_EXPORT_NOTE},
-  {id:"gemini",    name:"Gemini",     emoji:"🔴", color:"#ea4335", badge:"3.6 Flash", tag:"Быстрые ответы",
+  {id:"gemini",    name:"Gemini",     emoji:"🔴", color:"#ea4335", badge:"3.8 Flash", tag:"Быстрые ответы",
    system:"Ты Google Gemini. Анализируй глубоко. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём и процитируй его в ответе. Умеешь точно переводить между любыми языками. Используй дату из контекста. Если есть данные поиска — используй их."+FILE_EXPORT_NOTE},
   {id:"perplexity",name:"Perplexity", emoji:"🟣", color:"#8b5cf6", badge:"Agent API", tag:"Веб-поиск",
    system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."+FILE_EXPORT_NOTE},
   {id:"deepseek",  name:"DeepSeek",   emoji:"⚡", color:"#06b6d4", badge:"V4", tag:"Дешёвый код",
-   system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста. ВАЖНО: ты НЕ умеешь видеть прикреплённые изображения/сканы/чертежи напрямую — тебе доступен только извлечённый из них текст (если он есть). Если этого текста недостаточно, чтобы ответить по существу (например, план/чертёж/схема, где важна именно визуальная структура), — прямо и честно скажи, что не можешь увидеть изображение и опираешься только на обрывочный текст, и НЕ придумывай/не угадывай, что может быть на картинке (название чертежа, цифры, схему и т.п.). Ложное уверенное угадывание хуже честного отказа."+FILE_EXPORT_NOTE},
+   system:"Ты DeepSeek V4.1 Flash. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста. ВАЖНО: ты НЕ умеешь видеть прикреплённые изображения/сканы/чертежи напрямую — тебе доступен только извлечённый из них текст (если он есть). Если этого текста недостаточно, чтобы ответить по существу (например, план/чертёж/схема, где важна именно визуальная структура), — прямо и честно скажи, что не можешь увидеть изображение и опираешься только на обрывочный текст, и НЕ придумывай/не угадывай, что может быть на картинке (название чертежа, цифры, схему и т.п.). Ложное уверенное угадывание хуже честного отказа."+FILE_EXPORT_NOTE},
 ];
 
 // Fable — раньше был премиальной Claude-моделью уровня Mythos, недоступен для выбора в
@@ -3479,8 +3479,8 @@ async function callKimi(key, system, history){
   });
 }
 
-// Генерация/редактирование изображений через Gemini 3.1 Flash Image ("Nano Banana 2",
-// gemini-3.1-flash-image-preview) — тот же ключ Gemini, что уже используется для чата.
+// Генерация/редактирование изображений через Gemini Nano Banana 2.1
+// (gemini-nano-banana-2.1) — тот же ключ Gemini, что уже используется для чата.
 // Если передано исходное фото (imageFiles) — модель РЕДАКТИРУЕТ его по текстовому описанию
 // (например "сделай так, будто фасад облицован кирпичом"), а не рисует с нуля. Без фото —
 // обычная генерация картинки по тексту. Добавлено 11.09.2026.
@@ -3493,7 +3493,7 @@ async function generateGeminiImage(key, prompt, imageFiles){
     contents:[{role:"user", parts}],
     generationConfig:{responseModalities:["IMAGE","TEXT"]}
   };
-  const modelName="gemini-3.1-flash-image-preview";
+  const modelName="gemini-nano-banana-2.1";
   const d = await proxyFetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${key}`,{},payload);
   if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
   const cand=d.candidates && d.candidates[0];
@@ -3512,11 +3512,9 @@ async function callGemini(key, system, history){
   // (бенчмарк DeepSWE). Чистое обновление без доплаты, поэтому поставлена первой; 3.6-flash
   // и остальные оставлены как запасной вариант, если 3.8 будет недоступна/перегружена.
   const models=[
-    {name:"gemini-3.8-flash",       timeout:90000},
-    {name:"gemini-3.6-flash",       timeout:90000},
-    {name:"gemini-3.5-flash",       timeout:90000},
-    {name:"gemini-2.5-pro",         timeout:150000},
-    {name:"gemini-3.5-flash-lite",  timeout:60000},
+    // 17.10.2026: по решению владельца используется только gemini-3.8-flash (запасная цепочка
+    // убрана: 3.5-flash устарела, 2.5-pro доступна ограниченно). 2 попытки на модель — ниже.
+    {name:"gemini-3.8-flash",       timeout:120000},
   ];
   let lastErr=null;
   for(let mi=0;mi<models.length;mi++){
@@ -3614,7 +3612,7 @@ async function callPerplexity(key, system, history){
     // Подтверждённый формат из официального cookbook Perplexity (image-analysis example):
     // {"type":"input_text","text":"..."} и {"type":"input_image","image_url":"data:...;base64,..."}
     // (плоская строка, не вложенный объект как в старом chat/completions). Пресеты не гарантируют
-    // vision — для картинок явно переключаемся на подтверждённую в примере модель openai/gpt-5.4
+    // vision — для картинок явно переключаемся на подтверждённую в примере модель openai/gpt-6-luna
     // и вручную добавляем web_search, раз пресет тут не используется.
     const hasImages = fixedHistory.some(m=>Array.isArray(m.content)&&m.content.some(c=>c.type==="image_url"));
     const inputMessages = fixedHistory.map(function(m){
@@ -3635,7 +3633,7 @@ async function callPerplexity(key, system, history){
     // внимательно прочитать конкретное изображение (например, чертёж); инструмент мог отвлекать
     // модель на попытку что-то нагуглить вместо тщательного разбора самой картинки.
     const bodyObj = hasImages
-      ? {model:"openai/gpt-5.4", instructions:system, input:inputMessages}
+      ? {model:"openai/gpt-6-luna", instructions:system, input:inputMessages}
       : {preset:"fast", instructions:system, input:inputMessages};
     const pBody=JSON.stringify(bodyObj);
     // Perplexity API не отдаёт CORS-заголовки для браузерных запросов —
@@ -3671,7 +3669,7 @@ async function callDeepSeek(key, system, history, onChunk){
       return m;
     });
     const stream=!isMobile;
-    const dsBody=JSON.stringify({model:"deepseek-v4-flash",max_tokens:calcTokens(msgs),stream,messages:[{role:"system",content:system},...msgs]});
+    const dsBody=JSON.stringify({model:"deepseek-flash",max_tokens:calcTokens(msgs),stream,messages:[{role:"system",content:system},...msgs]});
     if(isMobile){
       const d=await proxyFetch("https://api.deepseek.com/chat/completions",{"Authorization":"Bearer "+key},dsBody);
       if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
@@ -3708,7 +3706,7 @@ async function callDeepSeek(key, system, history, onChunk){
       // прямой запрос бессмысленно, откатываемся на прокси (без стриминга, зато доходит).
       // Если ошибка была не сетевая, а настоящая ошибка API (неверный ключ и т.п.) —
       // прокси всё равно вернёт ровно ту же ошибку, так что просто пробуем.
-      const dNoStream=JSON.stringify({model:"deepseek-v4-flash",max_tokens:calcTokens(msgs),stream:false,messages:[{role:"system",content:system},...msgs]});
+      const dNoStream=JSON.stringify({model:"deepseek-flash",max_tokens:calcTokens(msgs),stream:false,messages:[{role:"system",content:system},...msgs]});
       const d=await proxyFetch("https://api.deepseek.com/chat/completions",{"Authorization":"Bearer "+key},dNoStream);
       if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
       return d.choices[0].message.content.trim();
@@ -3770,32 +3768,6 @@ function detectImageShowRequest(text){
 
 // Рендерит блок с найденными изображениями прямо в чат (не текстом для AI, а как настоящие <img>)
 
-
-// ── Веб-поиск для Claude через Perplexity ─────────────────────
-async function webSearchForClaude(query){
-  if(!keys.perplexity) return null;
-  try{
-    const body={model:"sonar",max_tokens:500,messages:[
-      {role:"system",content:"Краткий поиск. Только факты и даты."},
-      {role:"user",content:query}
-    ]};
-    // Жёсткий таймаут 6 секунд — не блокируем основной поток
-    const timeout = new Promise((_,rej)=>setTimeout(()=>rej(new Error("search timeout")),6000));
-    let fetchPromise;
-    if(isMobile){
-      fetchPromise = proxyFetch("https://api.perplexity.ai/chat/completions",{"Authorization":"Bearer "+keys.perplexity},body);
-    } else {
-      fetchPromise = fetch("https://api.perplexity.ai/chat/completions",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":"Bearer "+keys.perplexity},
-        body:JSON.stringify(body)
-      }).then(r=>r.json());
-    }
-    const d = await Promise.race([fetchPromise, timeout]);
-    if(!d||d.error||!d.choices) return null;
-    return d.choices[0]?.message?.content||null;
-  }catch(e){ console.warn("webSearch failed:", e.message); return null; }
-}
 
 async function callAgent(agent, system, history, onChunk){
   const keys=getKeys();
