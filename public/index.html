@@ -13,52 +13,15 @@
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png"/>
   <script>
     // Глобальный обработчик ошибок — предотвращает чёрный экран
-    window.__BUILD = "2026-10-17-g";
-    window.__authFallback = true; // модуль Firebase сбросит в false, когда успешно определит вход
-    window.__errLog = [];
-    function __logErr(kind, msg){
-      try{
-        window.__errLog.push(new Date().toLocaleTimeString()+" ["+kind+"] "+msg);
-        if(window.__errLog.length>30) window.__errLog.shift();
-        var b = document.getElementById("__dbgBadge");
-        if(b) b.textContent = "v"+window.__BUILD+(window.__errLog.length? "  ⚠"+window.__errLog.length : "");
-      }catch(e){}
-    }
     window.onerror = function(msg, src, line, col, err){
       console.error("Global error:", msg, src, line);
-      __logErr("error", msg+" ("+String(src||"").split("/").pop()+":"+line+")");
+      // Не показываем алерт — просто логируем
       return true; // предотвращаем стандартный обработчик
     };
     window.addEventListener("unhandledrejection", function(e){
       console.warn("Unhandled promise rejection:", e.reason);
-      __logErr("promise", (e.reason && (e.reason.message||e.reason.code)) || String(e.reason));
       e.preventDefault();
     });
-    // Ошибки загрузки скриптов/модулей (например, заблокированный gstatic.com) — не попадают в onerror
-    window.addEventListener("error", function(e){
-      var t = e.target;
-      if(t && t.tagName==="SCRIPT") __logErr("load", "не загрузился скрипт: "+(t.src||"inline module"));
-    }, true);
-    // Маленькая метка версии в левом нижнем углу: нажми — покажет журнал ошибок и состояние входа
-    window.addEventListener("DOMContentLoaded", function(){
-      var b = document.createElement("div");
-      b.id = "__dbgBadge";
-      b.style.cssText = "position:fixed;left:6px;bottom:2px;z-index:99999;font:10px monospace;color:#64748b;opacity:.75;padding:2px 4px;background:rgba(255,255,255,.7);border-radius:4px";
-      b.textContent = "v"+window.__BUILD+(window.__errLog.length? "  ⚠"+window.__errLog.length : "");
-      b.onclick = function(){
-        alert("Сборка: "+window.__BUILD+"\nМодуль входа Firebase: "+(window.__authFallback?"НЕ загрузился":"загружен")+
-              "\nauthDomain: "+(window.__authDomain||"?")+"\nUA: "+navigator.userAgent+"\n\nЖурнал ошибок:\n"+(window.__errLog.join("\n")||"(пусто)"));
-      };
-      document.body.appendChild(b);
-    });
-    // Временная заглушка на случай, если модуль Firebase (ниже) не загрузится
-    // или упадёт с ошибкой до того, как определит реальную функцию входа —
-    // без неё клик по кнопке "Войти" молча ничего не делал бы (window.signInWithGoogle
-    // оставался undefined, а onclick вызывает его через && и просто пропускает вызов).
-    // Модуль Firebase перезапишет это настоящей реализацией, если успешно загрузится.
-    window.signInWithGoogle = function(){
-      alert("Модуль авторизации (Firebase) не загрузился. Возможные причины:\n— нет связи с интернетом;\n— браузер блокирует сторонние скрипты (в Firefox проверь щит \"Усиленная защита от отслеживания\" в адресной строке — для этого сайта защиту нужно отключить);\n— временная ошибка сервера Firebase.\n\nПопробуй обновить страницу (потянуть вниз) или перезапустить браузер.");
-    };
   </script>
   <script src="vendor/pdf.min.js"></script>
   <script src="vendor/pdf-lib.min.js"></script>
@@ -74,18 +37,13 @@
 
     const firebaseConfig = {
       apiKey: "AIzaSyDsGW3WtnfY9Uv5GDXbVu6c4YJ1OJ9mmmU",
-      // authDomain = домен самого сайта (а не *.firebaseapp.com): иначе мобильный Firefox/Safari/Chrome
-      // блокируют стороннее хранилище, и результат signInWithRedirect теряется (вход "не завершается").
-      // Требует в Google Cloud Console → OAuth-клиент → Authorized redirect URIs:
-      // https://ai-hub-21af9.web.app/__/auth/handler
-      authDomain: "ai-hub-21af9.web.app",
+      authDomain: "ai-hub-21af9.firebaseapp.com",
       projectId: "ai-hub-21af9",
       storageBucket: "ai-hub-21af9.firebasestorage.app",
       messagingSenderId: "223206587851",
       appId: "1:223206587851:web:3725b7b9d08c7f9fef4a4e"
     };
 
-    window.__authDomain = firebaseConfig.authDomain;
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const auth = getAuth(app);
@@ -94,16 +52,8 @@
     let userId = null;
 
     // ── Обрабатываем результат redirect (мобильные браузеры) ────
-    // Перед вызовом signInWithRedirect ставим флаг в sessionStorage (см. ниже) — он живёт
-    // в этой же вкладке независимо от того, смогло ли внутреннее хранилище Firebase (indexedDB)
-    // пережить переход на accounts.google.com и обратно. Если флаг стоит, а getRedirectResult
-    // вернул пусто без ошибки — значит именно это хранилище Firebase было заблокировано
-    // (приватный режим / защита от отслеживания в Firefox), и мы можем явно сказать об этом.
-    const _pendingRedirectKey = "ai_hub_auth_redirect_pending";
+    // Обработка результата redirect (мобильные браузеры)
     getRedirectResult(auth).then(result => {
-      const wasPending = sessionStorage.getItem(_pendingRedirectKey) === "1";
-      sessionStorage.removeItem(_pendingRedirectKey);
-      if(typeof __logErr==="function") __logErr("auth", "redirect result: "+(result&&result.user?"user ok":"пусто")+", pending="+wasPending);
       if(result && result.user){
         // Вручную обновляем UI — onAuthStateChanged может не сработать вовремя
         const u = result.user;
@@ -118,45 +68,24 @@
         setTimeout(()=>{ typeof showToast==="function" && showToast("✅ Вошёл как "+(u.displayName||u.email)); }, 500);
         // Загружаем данные из облака
         if(typeof initCloudData === "function") initCloudData();
-      } else if(wasPending){
-        // Вернулись с Google, но result пуст и ошибки не было — Firebase не смог
-        // восстановить состояние между вкладками/переходом. Типичная причина на мобильном
-        // Firefox — приватный режим или блокировка стороннего хранилища (indexedDB) для
-        // accounts.google.com / firebaseapp.com.
-        setTimeout(()=>{
-          alert("Вход через Google не завершился: вернулись со страницы Google, но браузер не сохранил результат авторизации.\n\nЕсли открыто приватное окно (Private Browsing) — войди в обычном окне, приватный режим стирает нужные данные при переходах между сайтами.\n\nЕсли окно обычное — проверь значок щита \"Усиленная защита от отслеживания\" рядом с адресной строкой и отключи защиту для этого сайта, затем попробуй снова.");
-        }, 300);
       }
     }).catch(e => {
-      sessionStorage.removeItem(_pendingRedirectKey);
-      if(e.code && e.code !== "auth/no-current-user"){
-        console.warn("Redirect result error:", e.code, e.message);
-        setTimeout(()=>{ alert("Ошибка входа через Google: " + (e.message || e.code)); }, 300);
-      }
+      if(e.code && e.code !== "auth/no-current-user") console.warn("Redirect result error:", e.code, e.message);
     });
 
     // ── Google Sign-In ──────────────────────────────────────────
-    window.__authFallback = false; // реальный модуль входа загрузился
     window.signInWithGoogle = function(){
+      // Вызываем signInWithPopup синхронно из обработчика клика
+      // Chrome на Android требует прямой связи popup с user gesture
       provider.setCustomParameters({prompt: "select_account"});
-      // Сначала пробуем popup на всех устройствах (в том числе на телефоне): теперь authDomain
-      // совпадает с доменом сайта, и popup может вернуть результат без стороннего хранилища.
-      // signInWithRedirect на мобильном Firefox возвращал пустой результат (журнал: "redirect result:
-      // пусто, pending=true"), поэтому он остаётся только запасным вариантом.
-      const _fallbackToRedirect = function(){
-        try{ sessionStorage.setItem(_pendingRedirectKey, "1"); }catch(e){}
-        signInWithRedirect(auth, provider);
-      };
-      if(typeof __logErr==="function") __logErr("auth", "signInWithPopup, authDomain="+firebaseConfig.authDomain);
       signInWithPopup(auth, provider).then(function(result){
-        if(typeof __logErr==="function") __logErr("auth", "popup ok: "+(result&&result.user?"user":"?"));
         // onAuthStateChanged обработает автоматически
       }).catch(function(e){
-        if(typeof __logErr==="function") __logErr("auth", "popup error: "+(e.code||"")+" "+(e.message||""));
         if(e.code === "auth/popup-closed-by-user" || e.code === "auth/cancelled-popup-request") return;
-        if(e.code === "auth/popup-blocked" || e.code === "auth/operation-not-supported-in-this-environment"){
-          // Popup недоступен — последний резерв: редирект
-          _fallbackToRedirect();
+        if(e.code === "auth/popup-blocked"){
+          // Popup заблокирован — пробуем через новую вкладку
+          const url = "https://accounts.google.com";
+          alert("Браузер заблокировал всплывающее окно. Разреши popups для ai-hub-shamil.ru в настройках Chrome.");
         } else if(e.code === "auth/unauthorized-domain"){
           alert("⚠️ Домен не авторизован в Firebase!");
         } else {
@@ -478,11 +407,6 @@
     }, 60000);
   } catch(globalFirebaseErr) {
     console.error("Firebase init error:", globalFirebaseErr);
-    // Если ошибка случилась раньше, чем определилась настоящая window.signInWithGoogle —
-    // показываем конкретную причину вместо молчания при клике на кнопку входа.
-    window.signInWithGoogle = function(){
-      alert("Не удалось инициализировать Firebase: " + (globalFirebaseErr && (globalFirebaseErr.message || globalFirebaseErr.code || String(globalFirebaseErr))));
-    };
     // Страница продолжает работать без Firebase (локальный режим)
     window.cloudSync = window.cloudSync || {
       userId: "anon_local",
@@ -560,7 +484,6 @@
       <div>🔴 <b style="color:#f87171">Gemini</b> — <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#60a5fa">aistudio.google.com/apikey</a> → <b style="color:#4ade80">Бесплатно</b></div>
       <div>🟣 <b style="color:#c084fc">Perplexity</b> — <a href="https://www.perplexity.ai/settings/api" target="_blank" style="color:#60a5fa">perplexity.ai/settings/api</a></div>
       <div>⚡ <b style="color:#22d3ee">DeepSeek</b> — <a href="https://platform.deepseek.com/api_keys" target="_blank" style="color:#60a5fa">platform.deepseek.com</a> → <b style="color:#4ade80">Очень дёшево</b></div>
-      <div>🔵 <b style="color:#60a5fa">Kimi</b> — <a href="https://platform.kimi.ai" target="_blank" style="color:#60a5fa">platform.kimi.ai</a> → API Keys</div>
       <div>🌐 <b style="color:#4ade80">Tavily</b> — <a href="https://app.tavily.com" target="_blank" style="color:#60a5fa">app.tavily.com</a> → 1000 поисков/мес бесплатно</div>
     </div>
 
@@ -608,24 +531,15 @@
         <div style="font-size:10px;color:#6b7280;margin-top:4px">platform.deepseek.com → API Keys → Create</div>
       </div>
 
-      <!-- Kimi -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-          <span>🔵</span><span style="font-size:11px;font-weight:600;color:#3b82f6">Kimi</span>
-          <span style="font-size:9px;background:#dcfce7;color:#166534;padding:1px 6px;border-radius:3px;margin-left:auto">Креатив + Финансы</span>
-        </div>
-        <input type="password" id="key_kimi" placeholder="sk-..." style="width:100%;padding:7px 10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;color:#1e293b;font-size:12px"/>
-        <div style="font-size:10px;color:#6b7280;margin-top:4px">platform.kimi.ai → API Keys</div>
-      </div>
 
       <!-- GPT-4o -->
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-          <span>🟢</span><span style="font-size:11px;font-weight:600;color:#10a779">OpenAI</span>
-          <span style="font-size:9px;background:#f0fdf4;color:#166534;padding:1px 6px;border-radius:3px;margin-left:auto">Только голосовой ввод</span>
+          <span>🎙️</span><span style="font-size:11px;font-weight:600;color:#10a779">OpenAI (голосовой ввод)</span>
+          <span style="font-size:9px;background:#f0fdf4;color:#166534;padding:1px 6px;border-radius:3px;margin-left:auto">Только Whisper</span>
         </div>
         <input type="password" id="key_gpt" placeholder="sk-proj-..." style="width:100%;padding:7px 10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;color:#1e293b;font-size:12px"/>
-        <div style="font-size:10px;color:#6b7280;margin-top:4px">platform.openai.com/api-keys → Create</div>
+        <div style="font-size:10px;color:#6b7280;margin-top:4px">Нужен только для голосового ввода (Whisper). Как чат-агент не используется.</div>
       </div>
 
       <!-- Gamma -->
@@ -685,22 +599,6 @@
   </div>
 </div>
 
-<!-- KIMI MODAL -->
-<div id="kimiModal" style="display:none;position:fixed;inset:0;z-index:250;background:rgba(100,116,139,.6);align-items:center;justify-content:center;padding:16px">
-  <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;padding:22px;width:100%;max-width:640px;max-height:85vh;display:flex;flex-direction:column;gap:12px">
-    <div style="display:flex;align-items:center;justify-content:space-between">
-      <span style="font-size:14px;font-weight:700;color:#4f8ef7">🔵 Kimi — Структура презентации</span>
-      <div style="display:flex;gap:8px">
-        <button id="kimiCopyBtn" style="padding:5px 12px;background:#1e293b;color:#94a3b8;border:1px solid #374151;border-radius:7px;font-size:11px">📋 Копировать</button>
-        <button onclick="document.getElementById('kimiModal').style.display='none'" style="background:none;border:none;color:#6b7280;font-size:20px">✕</button>
-      </div>
-    </div>
-    <div style="font-size:11px;color:#6b7280;padding:4px 8px;background:#f8fafc;border-radius:6px" id="kimiModalTopic"></div>
-    <div id="kimiModalContent" style="flex:1;overflow-y:auto;font-size:13px;line-height:1.8;color:#1e293b;white-space:pre-wrap;background:#f8fafc;border-radius:8px;padding:14px;border:1px solid #e2e8f0"></div>
-    <div style="font-size:10px;color:#6b7280;text-align:center">Скопируй и вставь в Gamma, Canva или PowerPoint</div>
-  </div>
-</div>
-
 <!-- TOPBAR -->
 <div id="topbar" style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid #e2e8f0;flex-shrink:0;background:#ffffff;gap:10px">
   <button onclick="toggleSidebar()" style="background:none;border:none;color:#6b7280;font-size:18px;padding:2px">☰</button>
@@ -755,6 +653,9 @@
     <button onclick="searchPubMed()" style="padding:5px 10px;background:#0f172a;color:#60a5fa;border:1px solid #1e3a5f;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">🔬 Исследования PubMed</button>
     <button onclick="openDiary()" style="padding:5px 10px;background:#fff;color:#7c3aed;border:1px solid #ddd6fe;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">📔 Дневник</button>
     <button onclick="openBioAge()" style="padding:5px 10px;background:#fff;color:#0f172a;border:1px solid #cbd5e1;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">⏱ Биовозраст</button>
+    <button onclick="openCalcModal()" style="padding:5px 10px;background:#fff;color:#4338ca;border:1px solid #c7d2fe;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">🧮 Калькуляторы</button>
+    <button onclick="openDynamicsModal()" style="padding:5px 10px;background:#fff;color:#0f766e;border:1px solid #5eead4;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">📈 Динамика</button>
+    <button onclick="openMedsModal()" style="padding:5px 10px;background:#fff;color:#15803d;border:1px solid #4ade80;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">💊 Лекарства</button>
     <button onclick="showReminders()" id="reminderBtn" style="display:none;padding:5px 10px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">🔔</button>
   </div>
   <div style="display:flex;align-items:center;gap:6px;padding:6px 14px 8px;flex-wrap:wrap">
@@ -995,7 +896,7 @@ document.addEventListener("visibilitychange", function(){
 });
 let currentFiles = [];
 let searchEnabled = false;
-let activeAgentIds = JSON.parse(localStorage.getItem("active_agents")||"null") || ["claude","gemini","perplexity","deepseek"];
+let activeAgentIds = (JSON.parse(localStorage.getItem("active_agents")||"null") || ["claude","gemini","perplexity","deepseek"]).filter(x=>["claude","gemini","perplexity","deepseek"].includes(x));
 
 function getChat(){ return chats.find(c=>c.id===activeChatId); }
 
@@ -1051,12 +952,12 @@ const FILE_EXPORT_NOTE = " В приложении есть кнопки экс�
 const ALL_AGENTS = [
   {id:"claude",    name:"GLM-5.3-Flash", emoji:"🟠", color:"#d97706", badge:"Z.ai", tag:"Дёшево + зрение",
    system:"Ты GLM-5.3-Flash от Zhipu AI (Z.ai). Давай аналитические глубокие ответы. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём дословно и используй в ответе. Умеешь переводить между любыми языками мира точно и полностью. Текущая дата передана в начале сообщения. Помни историю разговора. Если в сообщении пользователя есть блок АКТУАЛЬНЫЕ ДАННЫЕ ИЗ ИНТЕРНЕТА — используй их как главный источник фактов, они получены из веб-поиска прямо сейчас."+FILE_EXPORT_NOTE},
-  {id:"gemini",    name:"Gemini",     emoji:"🔴", color:"#ea4335", badge:"3.8 Flash", tag:"Быстрые ответы",
+  {id:"gemini",    name:"Gemini",     emoji:"🔴", color:"#ea4335", badge:"3.6 Flash", tag:"Быстрые ответы",
    system:"Ты Google Gemini. Анализируй глубоко. Если прикреплено изображение — ОБЯЗАТЕЛЬНО прочитай весь текст на нём и процитируй его в ответе. Умеешь точно переводить между любыми языками. Используй дату из контекста. Если есть данные поиска — используй их."+FILE_EXPORT_NOTE},
   {id:"perplexity",name:"Perplexity", emoji:"🟣", color:"#8b5cf6", badge:"Agent API", tag:"Веб-поиск",
    system:"Ты Perplexity с доступом к интернету. Давай точные актуальные ответы с источниками. Если прикреплено изображение — прочитай текст на нём. Умеешь переводить между языками."+FILE_EXPORT_NOTE},
   {id:"deepseek",  name:"DeepSeek",   emoji:"⚡", color:"#06b6d4", badge:"V4", tag:"Дешёвый код",
-   system:"Ты DeepSeek V4.1 Flash. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста. Ты умеешь видеть прикреплённые изображения, сканы и чертежи. Если деталь на изображении не читается — прямо скажи об этом и НЕ придумывай цифры и подписи."+FILE_EXPORT_NOTE},
+   system:"Ты DeepSeek V3. Давай логичные структурированные ответы. Если есть текст из файлов или OCR — анализируй и переводи его. Умеешь переводить между всеми языками. Используй дату из контекста. ВАЖНО: ты НЕ умеешь видеть прикреплённые изображения/сканы/чертежи напрямую — тебе доступен только извлечённый из них текст (если он есть). Если этого текста недостаточно, чтобы ответить по существу (например, план/чертёж/схема, где важна именно визуальная структура), — прямо и честно скажи, что не можешь увидеть изображение и опираешься только на обрывочный текст, и НЕ придумывай/не угадывай, что может быть на картинке (название чертежа, цифры, схему и т.п.). Ложное уверенное угадывание хуже честного отказа."+FILE_EXPORT_NOTE},
 ];
 
 // Fable — раньше был премиальной Claude-моделью уровня Mythos, недоступен для выбора в
@@ -1203,7 +1104,14 @@ var HEALTH_BASE = "Ты — персональный AI Health Manager (Забо
   + "Принципы: НЕ ставишь диагнозов, НЕ назначаешь лечение. При острых симптомах — к врачу.\n"
   + "Переводи медданные на простой язык. Давай конкретные, измеримые советы.\n"
   + "При анализах: 1) что хорошо 2) что требует внимания (без паники) 3) конкретные шаги.\n"
-  + "Цель: максимизация Healthspan. Фокус: энергия, биомаркеры, биологический возраст.";
+  + "Цель: максимизация Healthspan. Фокус: энергия, биомаркеры, биологический возраст.\n"
+  + "ОПРОС ПЕРЕД ОТВЕТОМ: если пользователь описывает симптом или жалобу и в его данных нет ключевых деталей "
+  + "(как давно, насколько выражено, что усиливает/облегчает, сопутствующие симптомы, принимаемые лекарства), "
+  + "СНАЧАЛА задай 2-4 коротких уточняющих вопроса списком и НЕ давай выводов, пока не получишь ответы. "
+  + "Исключение: если в запросе уже достаточно деталей, это вопрос про анализы/документы, или есть признаки острого состояния "
+  + "(боль в груди, затруднённое дыхание, потеря сознания, резкая слабость одной стороны тела) — тогда сразу рекомендуй срочно обратиться за медпомощью.\n"
+  + "ЛЕКАРСТВА: учитывай список принимаемых препаратов из данных пользователя; если замечаешь совпадение действующих веществ или возможное взаимодействие — "
+  + "сообщи об этом и посоветуй уточнить у врача/фармацевта, не отменяй и не меняй дозировки сам.";
 
 var HEALTH_SYSTEMS = {
   claude:     HEALTH_BASE + "\n\nТы GLM-5.3-Flash. Детальный научный анализ с нюансами.",
@@ -1215,7 +1123,8 @@ var HEALTH_SYSTEMS = {
 var HEALTH_PROMPTS = {
   interpret:   "Расшифруй мои анализы как эксперт по превентивной медицине. Выдели норму, отклонения и дай рекомендации.",
   bioage:      "Оцени мой биологический возраст. Что ускоряет старение в моём случае? Топ-3 изменения с максимальным эффектом.",
-  risks:       "Оцени риски по имеющимся данным. Приоритеты: критично / важно / можно подождать."
+  risks:       "Оцени риски по имеющимся данным. Приоритеты: критично / важно / можно подождать.",
+  dynamics:    "Разбери динамику моих показателей по разделу ДИНАМИКА БИОМАРКЕРОВ в моих данных: что вернулось в норму, что ушло за норму, что устойчиво ухудшается или улучшается и на что обратить внимание в первую очередь. Опирайся только на приведённые значения и даты, ничего не выдумывай; если точек мало или даты неточные — скажи об этом."
 };
 
 function getHealthContext(){
@@ -1261,6 +1170,17 @@ function getHealthContext(){
     lines.push("=== ДАННЫЕ С УСТРОЙСТВ ===");
     lines = lines.concat(wrLines);
   }
+  var alertList = computeHealthAlerts();
+  if(alertList.length){
+    lines.push("=== ТРЕВОЖНЫЕ СИГНАЛЫ (по простым порогам, не диагноз) ===");
+    alertList.forEach(function(a){ lines.push("- " + a); });
+  }
+  var calcCtx = getCalcContext();
+  if(calcCtx) lines.push(calcCtx);
+  var dynCtx = getDynamicsContext();
+  if(dynCtx) lines.push(dynCtx);
+  var medsCtx = getMedsContext();
+  if(medsCtx) lines.push(medsCtx);
   var vaultCtx = getVaultContext();
   var bioCtx = lines.length > 0 ? "\n\nМОИ ДАННЫЕ:\n" + lines.join("\n") : "";
   return bioCtx + (vaultCtx ? "\n\n"+vaultCtx : "");
@@ -2419,7 +2339,8 @@ function exportHealthPDF(){
 // ── НАПОМИНАНИЯ ───────────────────────────────────────────────
 function checkReminders(){
   var bkeys = Object.keys(window.healthData.biomarkers);
-  if(!bkeys.length) return;
+  var alertsNow = computeHealthAlerts();
+  if(!bkeys.length && !alertsNow.length) return;
   var overdue = [];
   var today = new Date();
   bkeys.forEach(function(name){
@@ -2429,10 +2350,44 @@ function checkReminders(){
     var daysSince = Math.round((today - last)/(1000*60*60*24));
     if(daysSince > 90) overdue.push(name + " (" + daysSince + " дн. назад)");
   });
-  if(overdue.length > 0){
+  if(overdue.length > 0 || alertsNow.length > 0){
     var btn = document.getElementById("reminderBtn");
-    if(btn){ btn.style.display = "inline-block"; btn.title = "Пора пересдать: " + overdue.join(", "); }
+    if(btn){
+      btn.style.display = "inline-block";
+      btn.title = (alertsNow.length ? "Сигналы: " + alertsNow.join("; ") + ". " : "") + (overdue.length ? "Пора пересдать: " + overdue.join(", ") : "");
+    }
   }
+}
+
+// ── ТРЕВОЖНЫЕ СИГНАЛЫ ПО ДАННЫМ УСТРОЙСТВ ─────────────────────
+// Простые детерминированные пороги (без LLM). Пороги выбраны мной как грубые ориентиры,
+// а не клинические критерии: это повод обратить внимание/показаться врачу, не диагноз.
+// Данные считаются актуальными, только если последняя запись не старше 7 дней.
+function _lastN(arr, n){
+  if(!arr || arr.length < n) return null;
+  var sorted = arr.slice().sort(function(a,b){ return a.date > b.date ? 1 : a.date < b.date ? -1 : 0; });
+  var tail = sorted.slice(-n);
+  var age = (Date.now() - new Date(tail[tail.length-1].date).getTime()) / 86400000;
+  if(!(age <= 7)) return null;
+  return tail;
+}
+function computeHealthAlerts(){
+  var out = [];
+  try{
+    var wr = (window.healthData && window.healthData.wearable) || {};
+    var hr = _lastN(wr.heartRate, 3);
+    if(hr && hr.every(function(x){ return typeof x.value === "number" && x.value > 100; }))
+      out.push("Средний пульс выше 100 уд/мин три дня подряд (" + hr.map(function(x){return x.value;}).join(", ") + ") — если держится или есть симптомы, стоит показаться врачу");
+    var sl = _lastN(wr.sleep, 3);
+    if(sl && sl.every(function(x){ return typeof x.value === "number" && x.value < 6; }))
+      out.push("Сон меньше 6 часов три дня подряд (" + sl.map(function(x){return x.value;}).join(", ") + " ч)");
+    var st = _lastN(wr.steps, 7);
+    if(st){
+      var avg = st.reduce(function(a,b){ return a + (b.value||0); }, 0) / st.length;
+      if(avg < 3000) out.push("Низкая активность: в среднем " + Math.round(avg) + " шагов за последние 7 дней");
+    }
+  }catch(e){}
+  return out;
 }
 
 function showReminders(){
@@ -2452,6 +2407,10 @@ function showReminders(){
       +'</div>';
   }).filter(Boolean).join("");
 
+  var alertsHtml = computeHealthAlerts().map(function(a){
+    return '<div style="padding:6px 8px;margin-bottom:6px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:12px;color:#991b1b">⚠️ '+escHtml(a)+'</div>';
+  }).join("");
+  items = alertsHtml + items;
   var m = document.createElement("div");
   m.style.cssText = "position:fixed;bottom:80px;right:14px;z-index:302;background:#fff;border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,.2);width:320px;max-height:400px;display:flex;flex-direction:column";
   m.id = "remindersPanel";
@@ -2463,6 +2422,401 @@ function showReminders(){
   document.body.appendChild(m);
 }
 
+// ── ЛЕКАРСТВА ──────────────────────────────────────────────────
+// Список принимаемых препаратов хранится в данных профиля (pd.meds). Добавление — по фото упаковки
+// (GLM Vision) или вручную. Предупреждение о совпадении действующих веществ считается кодом
+// (сравнение нормализованных названий МНН), а не моделью. Извлечённое с фото AI может быть неверным —
+// сверяй с инструкцией на упаковке.
+function getMeds(){ var pd = getProfileData(); if(!pd.meds) pd.meds = []; return pd.meds; }
+function _normSub(x){ return String(x||"").toLowerCase().replace(/ё/g,"е").replace(/[^a-zа-я0-9 ]/g," ").replace(/\s+/g," ").trim(); }
+function findMedOverlaps(){
+  var meds = getMeds(), res = [], seen = {};
+  for(var i=0;i<meds.length;i++){
+    for(var j=i+1;j<meds.length;j++){
+      var a = (meds[i].substances||[]).map(_normSub), b = (meds[j].substances||[]).map(_normSub);
+      a.forEach(function(x){
+        if(x && b.indexOf(x) !== -1){
+          var key = i+"|"+j+"|"+x;
+          if(!seen[key]){ seen[key]=1; res.push({a:meds[i].name, b:meds[j].name, substance:x}); }
+        }
+      });
+    }
+  }
+  return res;
+}
+function getMedsContext(){
+  var meds = getMeds();
+  if(!meds.length) return "";
+  var l = ["=== ПРИНИМАЕМЫЕ ЛЕКАРСТВА ==="];
+  meds.forEach(function(m){
+    l.push("- " + m.name + (m.substances && m.substances.length ? " (д.в.: " + m.substances.join(", ") + ")" : "") + (m.dosage ? "; дозировка по инструкции: " + m.dosage : ""));
+  });
+  var ov = findMedOverlaps();
+  if(ov.length){
+    l.push("СОВПАДЕНИЕ ДЕЙСТВУЮЩИХ ВЕЩЕСТВ (риск передозировки): " + ov.map(function(o){ return o.a + " и " + o.b + " — " + o.substance; }).join("; "));
+  }
+  return l.join("\n");
+}
+function removeMed(i){
+  var meds = getMeds();
+  meds.splice(i,1);
+  persistHealthData();
+  openMedsModal();
+}
+function addMedManual(){
+  var name = prompt("Название препарата:");
+  if(!name) return;
+  var subs = prompt("Действующие вещества через запятую (МНН, например: ибупрофен):", "");
+  getMeds().push({name:name.trim(), substances:(subs||"").split(",").map(function(x){return x.trim();}).filter(Boolean), indications:"", dosage:"", warnings:"", added:new Date().toISOString().split("T")[0], source:"manual"});
+  persistHealthData();
+  openMedsModal();
+}
+function addMedFromPhoto(){
+  var key = getKeys().claude;
+  if(!key){ showToast("⚠️ Нужен ключ GLM-5.3-Flash (используется для распознавания фото)"); return; }
+  var inp = document.createElement("input");
+  inp.type = "file"; inp.accept = "image/*";
+  inp.onchange = function(){
+    var f = inp.files && inp.files[0];
+    if(!f) return;
+    showToast("⏳ Распознаю упаковку...");
+    var reader = new FileReader();
+    reader.onload = function(e){
+      compressImage(e.target.result, 1600, 0.85).then(async function(c){
+        try{
+          var b64 = c.split(",")[1] || "";
+          var msgs = [{role:"user", content:[
+            {type:"image_url", image_url:{url:"data:image/jpeg;base64,"+b64}},
+            {type:"text", text:"На фото упаковка лекарства. Верни ТОЛЬКО JSON без markdown:\n"
+              +'{"name":"торговое название","substances":["действующее вещество 1 (МНН по-русски, строчными)"],"indications":"краткие показания или null","dosage":"дозировка/схема, как написана на упаковке, или null","warnings":"главные предупреждения или null"}\n'
+              +"Правила: пиши только то, что реально видно на упаковке. Если действующее вещество не видно — substances = []. Ничего не домысливай и не добавляй по памяти. Если это не упаковка лекарства — верни {\"name\":null}."}
+          ]}];
+          var txt = (await callGlmUtility(key, msgs, 1200)).trim().replace(/```json|```/g,"").trim();
+          var a = txt.indexOf("{"), b = txt.lastIndexOf("}");
+          if(a > -1 && b > a) txt = txt.slice(a, b+1);
+          var r = JSON.parse(txt);
+          if(!r.name){ showToast("⚠️ Не вижу на фото упаковку лекарства"); return; }
+          getMeds().push({
+            name:String(r.name),
+            substances:(Array.isArray(r.substances)?r.substances:[]).map(String),
+            indications:r.indications||"", dosage:r.dosage||"", warnings:r.warnings||"",
+            added:new Date().toISOString().split("T")[0], source:"photo"
+          });
+          persistHealthData();
+          showToast("✅ Добавлено: " + r.name + " — сверь данные с инструкцией");
+          openMedsModal();
+        }catch(err){ showToast("❌ Не удалось распознать: " + err.message); }
+      }).catch(function(){ showToast("❌ Не удалось прочитать изображение"); });
+    };
+    reader.readAsDataURL(f);
+  };
+  inp.click();
+}
+function openMedsModal(){
+  var old = document.getElementById("medsModal");
+  if(old) old.remove();
+  var meds = getMeds();
+  var ov = findMedOverlaps();
+  var p = FAMILY_PROFILES[activeProfile] || {name:"Я"};
+  var ovHtml = ov.map(function(o){
+    return '<div style="padding:8px 10px;margin-bottom:8px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:12px;color:#991b1b">⚠️ Совпадает действующее вещество «'+escHtml(o.substance)+'»: '+escHtml(o.a)+' и '+escHtml(o.b)+'. Риск передозировки — уточни у врача или фармацевта.</div>';
+  }).join("");
+  var list = meds.map(function(m,i){
+    return '<div style="padding:8px 0;border-bottom:1px solid #f1f5f9">'
+      +'<div style="display:flex;align-items:center;gap:8px"><b style="flex:1;font-size:13px">💊 '+escHtml(m.name)+'</b>'
+      +'<button onclick="removeMed('+i+')" style="background:none;border:none;color:#ef4444;font-size:16px;cursor:pointer" title="Удалить">✕</button></div>'
+      +(m.substances&&m.substances.length?'<div style="font-size:12px;color:#475569">Д.в.: '+escHtml(m.substances.join(", "))+'</div>':'<div style="font-size:12px;color:#b45309">Действующее вещество не указано — проверка совпадений для него не работает</div>')
+      +(m.indications?'<div style="font-size:12px;color:#475569">Показания: '+escHtml(m.indications)+'</div>':'')
+      +(m.dosage?'<div style="font-size:12px;color:#475569">Дозировка: '+escHtml(m.dosage)+'</div>':'')
+      +(m.warnings?'<div style="font-size:12px;color:#92400e">Предупреждения: '+escHtml(m.warnings)+'</div>':'')
+      +'<div style="font-size:10px;color:#94a3b8">'+(m.source==="photo"?"по фото, ":"вручную, ")+escHtml(m.added||"")+'</div></div>';
+  }).join("") || '<div style="color:#94a3b8;font-size:13px;padding:10px 0">Список пуст</div>';
+  var m = document.createElement("div");
+  m.id = "medsModal";
+  m.style.cssText = "position:fixed;inset:0;z-index:303;background:rgba(100,116,139,.6);display:flex;align-items:center;justify-content:center;padding:16px";
+  m.innerHTML = '<div style="background:#fff;border-radius:14px;width:100%;max-width:480px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">'
+    +'<div style="padding:12px 14px;background:linear-gradient(135deg,#15803d,#16a34a);border-radius:14px 14px 0 0;display:flex;align-items:center">'
+    +'<span style="flex:1;font-size:13px;font-weight:700;color:#fff">💊 Мои лекарства ['+escHtml(p.name)+']</span>'
+    +'<button onclick="document.getElementById(\'medsModal\').remove()" style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer">✕</button></div>'
+    +'<div style="flex:1;overflow-y:auto;padding:10px 14px">'+ovHtml+list+'</div>'
+    +'<div style="padding:10px 14px;border-top:1px solid #e2e8f0;display:flex;gap:8px;flex-wrap:wrap">'
+    +'<button onclick="addMedFromPhoto()" style="padding:6px 12px;background:#15803d;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer">📷 Добавить по фото</button>'
+    +'<button onclick="addMedManual()" style="padding:6px 12px;background:#fff;color:#15803d;border:1px solid #4ade80;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer">✍️ Вручную</button></div>'
+    +'<div style="padding:0 14px 10px;font-size:10px;color:#94a3b8">Данные с фото распознаёт AI и он может ошибиться — сверяй с инструкцией. Это не медицинская рекомендация.</div>'
+    +'</div>';
+  document.body.appendChild(m);
+}
+
+
+// ── ДИНАМИКА БИОМАРКЕРОВ («было → стало») ──────────────────────
+// Всё считается кодом по сохранённым значениям. Референс берётся из записи самого документа
+// (docNorm) — это текст вида "3.5-5.5", "< 5.2", "до 5,2"; если разобрать не удалось, статус
+// относительно нормы не показывается (а не угадывается).
+function _dynParseNorm(txt){
+  if(!txt) return null;
+  var t = String(txt).replace(/,/g,".").replace(/\s+/g," ").trim();
+  var m = t.match(/(-?\d+(?:\.\d+)?)\s*(?:-|–|—|до)\s*(-?\d+(?:\.\d+)?)/i);
+  if(m){ var a = parseFloat(m[1]), b = parseFloat(m[2]); if(a <= b) return {lo:a, hi:b}; }
+  m = t.match(/^(?:<|<=|≤|до|менее|меньше)\s*(-?\d+(?:\.\d+)?)/i);
+  if(m) return {lo:null, hi:parseFloat(m[1])};
+  m = t.match(/^(?:>|>=|≥|более|больше|от)\s*(-?\d+(?:\.\d+)?)/i);
+  if(m) return {lo:parseFloat(m[1]), hi:null};
+  return null;
+}
+function _normState(v, r){
+  if(!r) return null;
+  if(r.lo !== null && v < r.lo) return "low";
+  if(r.hi !== null && v > r.hi) return "high";
+  return "ok";
+}
+function _distOut(v, r){
+  if(!r) return 0;
+  if(r.lo !== null && v < r.lo) return r.lo - v;
+  if(r.hi !== null && v > r.hi) return v - r.hi;
+  return 0;
+}
+function computeBiomarkerDynamics(){
+  var res = [];
+  var bm = (window.healthData && window.healthData.biomarkers) || {};
+  Object.keys(bm).forEach(function(name){
+    var pts = (bm[name]||[]).filter(function(e){ return typeof e.value === "number"; });
+    if(pts.length < 2) return;
+    var last = pts[pts.length-1], prev = pts[pts.length-2], first = pts[0];
+    var range = _dynParseNorm(last.docNorm);
+    var delta = last.value - prev.value;
+    var pct = prev.value !== 0 ? (delta / Math.abs(prev.value)) * 100 : null;
+    var sLast = _normState(last.value, range), sPrev = _normState(prev.value, range);
+    var verdict = "";
+    if(range && sLast && sPrev){
+      if(sPrev !== "ok" && sLast === "ok") verdict = "вернулся в норму";
+      else if(sPrev === "ok" && sLast !== "ok") verdict = "вышел за норму (" + (sLast === "high" ? "выше" : "ниже") + ")";
+      else if(sPrev !== "ok" && sLast !== "ok"){
+        var dp = _distOut(prev.value, range), dl = _distOut(last.value, range);
+        verdict = dl < dp ? "всё ещё вне нормы, но ближе к ней" : dl > dp ? "вне нормы и отдаляется" : "вне нормы, без изменений";
+      } else verdict = "в норме";
+    }
+    res.push({name:name, unit:last.unit||"", pts:pts, first:first, prev:prev, last:last, delta:delta, pct:pct,
+              range:range, sLast:sLast, verdict:verdict, guessed:!!(last.dateGuessed || prev.dateGuessed)});
+  });
+  // Сначала то, что вышло за норму/сменило статус, затем по величине изменения
+  function rank(d){ return d.verdict.indexOf("вышел")===0 ? 0 : d.verdict.indexOf("вне нормы")===0 ? 1 : d.verdict.indexOf("вернулся")===0 ? 2 : 3; }
+  res.sort(function(a,b){ return rank(a) - rank(b) || Math.abs(b.pct||0) - Math.abs(a.pct||0); });
+  return res;
+}
+function _fmtNum(x){ return (Math.round(x*100)/100).toString(); }
+function getDynamicsContext(){
+  var dyn = computeBiomarkerDynamics();
+  if(!dyn.length) return "";
+  var l = ["=== ДИНАМИКА БИОМАРКЕРОВ (последние значения, рассчитано программой) ==="];
+  dyn.slice(0,40).forEach(function(d){
+    var hist = d.pts.slice(-4).map(function(e){ return _fmtNum(e.value) + " (" + e.date + ")"; }).join(" → ");
+    l.push("- " + d.name + ", " + d.unit + ": " + hist + "; изменение к предыдущему " + (d.delta>0?"+":"") + _fmtNum(d.delta) + (d.pct!==null ? " ("+(d.pct>0?"+":"")+_fmtNum(d.pct)+"%)" : "")
+      + (d.verdict ? "; " + d.verdict : "") + (d.range ? "; норма по бланку: " + d.last.docNorm : "") + (d.guessed ? "; ⚠️ дата одного из значений не найдена в документе" : ""));
+  });
+  return l.join("\n");
+}
+function openDynamicsModal(){
+  var old = document.getElementById("dynModal");
+  if(old) old.remove();
+  var dyn = computeBiomarkerDynamics();
+  var p = FAMILY_PROFILES[activeProfile] || {name:"Я"};
+  var rows = dyn.map(function(d){
+    var col = d.verdict.indexOf("вышел")===0 || d.verdict.indexOf("вне нормы")===0 ? "#dc2626" : d.verdict.indexOf("вернулся")===0 || d.verdict==="в норме" ? "#16a34a" : "#64748b";
+    var arrow = d.delta > 0 ? "↑" : d.delta < 0 ? "↓" : "→";
+    return '<div style="padding:8px 0;border-bottom:1px solid #f1f5f9">'
+      +'<div style="display:flex;gap:8px;align-items:baseline"><b style="flex:1;font-size:13px">'+escHtml(d.name)+'</b>'
+      +'<span style="font-size:13px;font-weight:700;color:'+col+'">'+arrow+' '+(d.delta>0?"+":"")+_fmtNum(d.delta)+(d.pct!==null?' ('+(d.pct>0?"+":"")+_fmtNum(d.pct)+'%)':'')+'</span></div>'
+      +'<div style="font-size:12px;color:#475569">'+d.pts.slice(-5).map(function(e){return _fmtNum(e.value)+' <span style="color:#94a3b8">'+escHtml(e.date)+'</span>';}).join(' → ')+' '+escHtml(d.unit)+'</div>'
+      +(d.verdict?'<div style="font-size:12px;color:'+col+'">'+escHtml(d.verdict)+(d.last.docNorm?' · норма по бланку: '+escHtml(d.last.docNorm):'')+'</div>':'<div style="font-size:11px;color:#94a3b8">Норма по бланку не распознана — статус не определён</div>')
+      +(d.guessed?'<div style="font-size:11px;color:#b45309">⚠️ у одного из значений дата не найдена в документе</div>':'')
+      +'</div>';
+  }).join("") || '<div style="color:#94a3b8;font-size:13px;padding:10px 0">Нужно минимум два замера одного показателя (загрузи в Health Vault анализы за разные даты).</div>';
+  var m = document.createElement("div");
+  m.id = "dynModal";
+  m.style.cssText = "position:fixed;inset:0;z-index:303;background:rgba(100,116,139,.6);display:flex;align-items:center;justify-content:center;padding:16px";
+  m.innerHTML = '<div style="background:#fff;border-radius:14px;width:100%;max-width:520px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">'
+    +'<div style="padding:12px 14px;background:linear-gradient(135deg,#0f766e,#14b8a6);border-radius:14px 14px 0 0;display:flex;align-items:center">'
+    +'<span style="flex:1;font-size:13px;font-weight:700;color:#fff">📈 Динамика анализов ['+escHtml(p.name)+']</span>'
+    +'<button onclick="document.getElementById(\'dynModal\').remove()" style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer">✕</button></div>'
+    +'<div style="flex:1;overflow-y:auto;padding:6px 14px">'+rows+'</div>'
+    +'<div style="padding:10px 14px;border-top:1px solid #e2e8f0;display:flex;gap:8px;align-items:center">'
+    +(dyn.length?'<button onclick="document.getElementById(\'dynModal\').remove();hAct(\'dynamics\')" style="padding:6px 12px;background:#0f766e;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer">🤖 Разбор динамики</button>':'')
+    +'<span style="font-size:10px;color:#94a3b8">Статус относительно нормы — по референсу из бланка. Не медицинское заключение.</span></div>'
+    +'</div>';
+  document.body.appendChild(m);
+}
+
+// ── МЕДИЦИНСКИЕ КАЛЬКУЛЯТОРЫ ───────────────────────────────────
+// Считает код по последним сохранённым значениям биомаркеров (не модель). Единицы приводятся
+// автоматически (ммоль/л, мг/дл, мкмоль/л и т.д.); если единицы не распознаны — расчёт не выполняется.
+// Возраст и пол берутся из профиля (в профиле по умолчанию возраст 35 — проверь!).
+// Результат — скрининговая оценка, не диагноз.
+var CALC_NAMES = {
+  glucose:["Глюкоза"], insulin:["Инсулин"], tc:["Холестерин","Холестерин общий"], ldl:["ЛПНП"], hdl:["ЛПВП"],
+  tg:["Триглицериды"], alt:["АЛТ"], ast:["АСТ"], plt:["Тромбоциты"], crea:["Креатинин"],
+  ca:["Кальций","Кальций общий"], alb:["Альбумин"], qt:["QT"], hr:["ЧСС"]
+};
+function _calcPick(key){
+  var bm = (window.healthData && window.healthData.biomarkers) || {};
+  var names = CALC_NAMES[key];
+  for(var i=0;i<names.length;i++){
+    var arr = (bm[names[i]]||[]).filter(function(e){ return typeof e.value === "number"; });
+    if(arr.length){ var e = arr[arr.length-1]; return {name:names[i], value:e.value, unit:String(e.unit||""), date:e.date, guessed:!!e.dateGuessed}; }
+  }
+  return null;
+}
+// Приведение к базовым единицам: glucose/chol/tg/ca — ммоль/л; insulin — мкМЕ/мл; crea — мг/дл;
+// alb — г/л; qt — мс. Возвращает число или null, если единицы неизвестны.
+function _calcConv(key, x){
+  if(!x) return null;
+  var u = x.unit.toLowerCase().replace(/\s/g,"").replace(/µ/g,"мк").replace(/μ/g,"мк");
+  var v = x.value, mg = /мг\/дл|mg\/dl/.test(u), mmol = /ммоль\/л|mmol\/l/.test(u);
+  switch(key){
+    case "glucose": return mmol ? v : mg ? v/18.016 : null;
+    case "tc": case "ldl": case "hdl": return mmol ? v : mg ? v/38.67 : null;
+    case "tg": return mmol ? v : mg ? v/88.57 : null;
+    case "ca": return mmol ? v : mg ? v/4.008 : null;
+    case "insulin": return /пмоль|pmol/.test(u) ? v/6.945 : /ме|ед|iu/.test(u) ? v : null;
+    case "crea": return /мкмоль\/л|umol\/l|μmol\/l/.test(u) ? v/88.4 : mg ? v : null;
+    case "alb": return /г\/л|g\/l/.test(u) ? v : /г\/дл|g\/dl/.test(u) ? v*10 : null;
+    case "qt": return /^(мс|ms)$/.test(u) ? v : v < 10 ? v*1000 : v >= 200 ? v : null;
+    case "hr": return v;
+    case "alt": case "ast": return v;
+    case "plt": return v;
+  }
+  return null;
+}
+function _dateSpan(items){
+  var ts = items.map(function(x){ return new Date(x.date).getTime(); }).filter(function(t){ return !isNaN(t); });
+  if(ts.length < 2) return 0;
+  return (Math.max.apply(null, ts) - Math.min.apply(null, ts)) / 86400000;
+}
+function computeCalculators(){
+  var out = [], missing = [];
+  var prof = FAMILY_PROFILES[activeProfile] || {};
+  var age = Number(prof.age), sex = prof.gender === "f" ? "f" : "m";
+  function get(keys){
+    var raw = {}, conv = {}, miss = [];
+    keys.forEach(function(k){
+      var r = _calcPick(k);
+      if(!r){ miss.push(CALC_NAMES[k][0]); return; }
+      var c = _calcConv(k, r);
+      if(c === null || !isFinite(c)){ miss.push(CALC_NAMES[k][0] + " (единицы «" + r.unit + "» не распознаны)"); return; }
+      raw[k] = r; conv[k] = c;
+    });
+    return {raw:raw, v:conv, miss:miss, items:Object.keys(raw).map(function(k){return raw[k];})};
+  }
+  function add(title, g, formula, result, interp, extraWarn){
+    var warn = [];
+    var span = _dateSpan(g.items);
+    if(span > 3) warn.push("значения взяты с разных дат (разброс " + Math.round(span) + " дн.)");
+    if(g.items.some(function(x){ return x.guessed; })) warn.push("у одного из значений дата не найдена в документе");
+    if(extraWarn) warn.push(extraWarn);
+    out.push({title:title, formula:formula, result:result, interp:interp, warn:warn,
+      inputs:g.items.map(function(x){ return x.name + " " + x.value + " " + x.unit + " (" + x.date + ")"; })});
+  }
+  function need(title, g){ if(g.miss.length) missing.push({title:title, miss:g.miss}); return !g.miss.length; }
+  var r1 = function(x,d){ var m = Math.pow(10, d===undefined?1:d); return Math.round(x*m)/m; };
+
+  // 1) eGFR CKD-EPI 2021 (без расы)
+  var g = get(["crea"]);
+  if(isFinite(age) && age >= 18 && need("СКФ (CKD-EPI 2021)", g)){
+    var k = sex === "f" ? 0.7 : 0.9, a = sex === "f" ? -0.241 : -0.302, scr = g.v.crea;
+    var egfr = 142 * Math.pow(Math.min(scr/k,1), a) * Math.pow(Math.max(scr/k,1), -1.2) * Math.pow(0.9938, age) * (sex === "f" ? 1.012 : 1);
+    var stage = egfr >= 90 ? "G1 (≥90)" : egfr >= 60 ? "G2 (60–89)" : egfr >= 45 ? "G3a (45–59)" : egfr >= 30 ? "G3b (30–44)" : egfr >= 15 ? "G4 (15–29)" : "G5 (<15)";
+    add("СКФ (CKD-EPI 2021)", g, "142 × min(Scr/κ,1)^α × max(Scr/κ,1)^−1.200 × 0.9938^возраст × 1.012 (жен.); Scr в мг/дл; κ=" + k + ", α=" + a,
+      r1(egfr,0) + " мл/мин/1.73м²", "Категория " + stage + ". Диагноз ХБП требует сохранения сниженной СКФ или признаков поражения почек более 3 месяцев — по одному значению выводов делать нельзя.",
+      "возраст " + age + " и пол «" + (sex==="f"?"жен":"муж") + "» из профиля");
+  }
+  // 2) FIB-4
+  g = get(["ast","alt","plt"]);
+  if(isFinite(age) && age > 0 && need("FIB-4", g) && g.v.alt > 0 && g.v.plt > 0){
+    var fib = age * g.v.ast / (g.v.plt * Math.sqrt(g.v.alt));
+    var low = age >= 65 ? 2.0 : 1.3;
+    add("FIB-4 (риск фиброза печени)", g, "возраст × АСТ / (тромбоциты[10⁹/л] × √АЛТ)", r1(fib,2),
+      fib < low ? "Ниже порога низкого риска (" + low + "): фиброз продвинутой стадии маловероятен." : fib > 2.67 ? "Выше 2.67: высокая вероятность значимого фиброза — нужна консультация гепатолога." : "Промежуточная зона (" + low + "–2.67): значение неопределённое, обычно требуется дообследование.",
+      "возраст " + age + " из профиля; пороги: " + low + " (низкий) / 2.67 (высокий)");
+  }
+  // 3) HOMA-IR
+  g = get(["glucose","insulin"]);
+  if(need("HOMA-IR", g)){
+    var homa = g.v.glucose * g.v.insulin / 22.5;
+    add("HOMA-IR (инсулинорезистентность)", g, "глюкоза[ммоль/л] × инсулин[мкМЕ/мл] / 22.5", r1(homa,2),
+      homa < 1 ? "Ниже 1.0 — чувствительность к инсулину хорошая." : homa < 2.5 ? "Около нормы (ориентир до ~2.5)." : "Выше ~2.5 — может указывать на инсулинорезистентность.",
+      "считается только для натощаковых значений; порог в литературе варьирует (≈2.5–2.7) в зависимости от метода и популяции");
+  }
+  // 4) ЛПНП по Фридевальду + не-ЛПВП
+  g = get(["tc","hdl","tg"]);
+  if(need("ЛПНП (Фридевальд) / не-ЛПВП", g)){
+    var nonhdl = g.v.tc - g.v.hdl;
+    var res = "не-ЛПВП " + r1(nonhdl,2) + " ммоль/л";
+    var itp = "Не-ЛПВП: ориентир для общей популяции < 3.4 ммоль/л (130 мг/дл); целевое значение зависит от сердечно-сосудистого риска.";
+    if(g.v.tg < 4.5){
+      var ldl = g.v.tc - g.v.hdl - g.v.tg/2.2;
+      res = "ЛПНП ≈ " + r1(ldl,2) + " ммоль/л; " + res;
+      var ml = _calcPick("ldl"); var mc = ml ? _calcConv("ldl", ml) : null;
+      if(mc !== null && isFinite(mc)) itp += " Измеренный ЛПНП в данных: " + r1(mc,2) + " ммоль/л (при расхождении ориентируйся на измеренный).";
+    } else itp = "Триглицериды ≥ 4.5 ммоль/л — формула Фридевальда неприменима, ЛПНП не считается. " + itp;
+    add("ЛПНП (Фридевальд) / не-ЛПВП", g, "ЛПНП = ХС − ЛПВП − ТГ/2.2 (ммоль/л; при ТГ < 4.5); не-ЛПВП = ХС − ЛПВП", res, itp);
+  }
+  // 5) Скорректированный кальций
+  g = get(["ca","alb"]);
+  if(need("Кальций скорректированный", g)){
+    var cac = g.v.ca + 0.02 * (40 - g.v.alb);
+    add("Кальций, скорректированный на альбумин", g, "Ca[ммоль/л] + 0.02 × (40 − альбумин[г/л])", r1(cac,2) + " ммоль/л",
+      "Сравни с референсом из бланка (обычно около 2.15–2.55 ммоль/л, зависит от лаборатории). Поправка имеет смысл в основном при сниженном альбумине.");
+  }
+  // 6) QTc
+  g = get(["qt","hr"]);
+  if(need("QTc", g) && g.v.hr > 0){
+    var rr = 60 / g.v.hr;
+    var qb = g.v.qt / Math.sqrt(rr), qf = g.v.qt / Math.cbrt(rr);
+    var lim = sex === "f" ? 460 : 450;
+    add("QTc (Базетт / Фридерициа)", g, "QTcB = QT/√RR; QTcF = QT/∛RR; RR = 60/ЧСС (с)", "Базетт " + r1(qb,0) + " мс; Фридерициа " + r1(qf,0) + " мс",
+      "Ориентир удлинения: > " + lim + " мс для пола «" + (sex==="f"?"жен":"муж") + "». При ЧСС выше ~90 Базетт завышает QTc, ориентируйся на Фридерициа. Оценка по ЭКГ — за врачом.",
+      "ЧСС и QT должны быть с одной ЭКГ");
+  }
+  return {results:out, missing:missing};
+}
+function getCalcContext(){
+  var c = computeCalculators();
+  if(!c.results.length) return "";
+  var l = ["=== РАСЧЁТЫ ПРОГРАММЫ (формулы, не диагноз) ==="];
+  c.results.forEach(function(r){
+    l.push("- " + r.title + ": " + r.result + ". " + r.interp + (r.warn.length ? " [Оговорки: " + r.warn.join("; ") + "]" : ""));
+  });
+  return l.join("\n");
+}
+function openCalcModal(){
+  var old = document.getElementById("calcModal");
+  if(old) old.remove();
+  var c = computeCalculators();
+  var p = FAMILY_PROFILES[activeProfile] || {name:"Я"};
+  var rows = c.results.map(function(r){
+    return '<div style="padding:10px 0;border-bottom:1px solid #f1f5f9">'
+      +'<div style="font-size:13px;font-weight:700;color:#0f172a">'+escHtml(r.title)+'</div>'
+      +'<div style="font-size:15px;font-weight:700;color:#4338ca;margin:2px 0">'+escHtml(r.result)+'</div>'
+      +'<div style="font-size:12px;color:#334155">'+escHtml(r.interp)+'</div>'
+      +'<div style="font-size:11px;color:#64748b;margin-top:3px">Исходные: '+r.inputs.map(escHtml).join('; ')+'</div>'
+      +'<div style="font-size:11px;color:#94a3b8">Формула: '+escHtml(r.formula)+'</div>'
+      +(r.warn.length?'<div style="font-size:11px;color:#b45309">⚠️ '+r.warn.map(escHtml).join('; ')+'</div>':'')
+      +'</div>';
+  }).join("") || '<div style="color:#94a3b8;font-size:13px;padding:10px 0">Недостаточно данных ни для одного расчёта.</div>';
+  var miss = c.missing.map(function(x){
+    return '<div style="font-size:11px;color:#94a3b8;padding:2px 0">• '+escHtml(x.title)+': не хватает — '+x.miss.map(escHtml).join(', ')+'</div>';
+  }).join("");
+  var m = document.createElement("div");
+  m.id = "calcModal";
+  m.style.cssText = "position:fixed;inset:0;z-index:303;background:rgba(100,116,139,.6);display:flex;align-items:center;justify-content:center;padding:16px";
+  m.innerHTML = '<div style="background:#fff;border-radius:14px;width:100%;max-width:520px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">'
+    +'<div style="padding:12px 14px;background:linear-gradient(135deg,#4338ca,#6366f1);border-radius:14px 14px 0 0;display:flex;align-items:center">'
+    +'<span style="flex:1;font-size:13px;font-weight:700;color:#fff">🧮 Калькуляторы ['+escHtml(p.name)+', '+escHtml(String(p.age))+' лет, '+(p.gender==="f"?"жен":"муж")+']</span>'
+    +'<button onclick="document.getElementById(\'calcModal\').remove()" style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer">✕</button></div>'
+    +'<div style="flex:1;overflow-y:auto;padding:4px 14px">'+rows+(miss?'<div style="padding:10px 0"><div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:2px">Не рассчитано:</div>'+miss+'</div>':'')+'</div>'
+    +'<div style="padding:10px 14px;border-top:1px solid #e2e8f0;font-size:10px;color:#94a3b8">Считается по последним сохранённым значениям. Возраст и пол берутся из профиля. Скрининговая оценка, не диагноз и не назначение.</div>'
+    +'</div>';
+  document.body.appendChild(m);
+}
 
 
 // ════════════════════════════════════════════════════
@@ -3288,38 +3642,6 @@ async function directOrProxyFetch(url, headers, body){
   }
 }
 
-async function callOpenAI(key, system, history){
-  return callWithRetry(async()=>{
-    // Обновлено 30.07.2026: gpt-5.4-mini -> gpt-5.6-luna. Новое поколение (5.6 вместо 5.4),
-    // ощутимо дешевле после последнего снижения цен OpenAI ($0.20/$1.20 за млн токенов), и по
-    // независимым бенчмаркам агентных задач обгоняет даже Claude Fable 5/Opus 4.8, несмотря на
-    // то что это самый дешёвый тир линейки — подходит под тег "Практичные советы" идеально.
-    const body=JSON.stringify({model:"gpt-5.6-luna",max_completion_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
-    let d;
-    if(isMobile){
-      d=await proxyFetch("https://api.openai.com/v1/chat/completions",{"Authorization":"Bearer "+key},body);
-    } else {
-      try{
-        const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),90000);
-        const r=await fetch("https://api.openai.com/v1/chat/completions",{
-          method:"POST",signal:ctrl.signal,
-          headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},
-          body
-        });
-        clearTimeout(t); d=await r.json();
-      }catch(directErr){
-        // Прямой запрос из браузера может быть заблокирован на уровне сети/провайдера
-        // (например в РФ без VPN) — "Failed to fetch" в этом случае значит именно это,
-        // и повторять тот же прямой запрос бессмысленно. Откатываемся на прокси
-        // (Cloud Function идёт с серверов Google, а не с IP пользователя).
-        d=await proxyFetch("https://api.openai.com/v1/chat/completions",{"Authorization":"Bearer "+key},body);
-      }
-    }
-    if(d.error) throw new Error(d.error.message);
-    return d.choices[0].message.content.trim();
-  });
-}
-
 // ЗАМЕНЕНО 02.09.2026: раньше выбирала между claude-sonnet-5/claude-haiku-4-5 по сложности
 // запроса. У GLM-5.3-Flash одна модель на все случаи — функцию оставили (чтобы не трогать
 // вызовы по всему коду), но она теперь просто всегда возвращает единственную модель.
@@ -3429,58 +3751,8 @@ async function callClaude(key, system, history, onChunk, forceModel){
   });
 }
 
-async function callKimi(key, system, history){
-  return callWithRetry(async()=>{
-    // Защита: если в само поле ключа случайно попало "Bearer ..." (например, при копировании
-    // из примера curl) — убираем этот префикс, иначе заголовок получится "Bearer Bearer sk-..."
-    // и API вернёт Invalid Authentication даже с правильным ключом.
-    const cleanKey=key.replace(/^Bearer\s+/i,"").trim();
-    // РАНЬШЕ здесь первыми двумя попытками хаб всегда стучался в api.kimi.com/coding/v1 —
-    // это ОТДЕЛЬНЫЙ продукт "Kimi Code" со своими ключами. Обычный ключ с platform.moonshot.ai
-    // там гарантированно не подходит — то есть при каждом сообщении с Kimi хаб сначала дважды
-    // гарантированно ловил Invalid Authentication, и только потом (если вообще доходило) шёл на
-    // рабочий адрес.
-    // ОБНОВЛЕНО 16.08.2026: разобрали реальный случай — api.moonshot.ai возвращал "Invalid
-    // Authentication" для конкретной пары ключ+kimi-k3, хотя ТОТ ЖЕ ключ прекрасно работал в
-    // Playground на platform.moonshot.ai (то есть ключ валиден, просто эта конкретная модель на
-    // этом конкретном адресе — нет). Судя по официальной документации, kimi-k3 официально живёт
-    // на platform.kimi.ai (api.kimi.ai), а не на platform.moonshot.ai — поэтому теперь он идёт
-    // ПЕРВЫМ. Также убрали шорткат "auth-ошибка = не пробовать остальные адреса" — на практике
-    // он оказался неверным допущением именно для этого случая: одна и та же ошибка на одном
-    // домене вовсе не значит то же самое на другом, если домены — это фактически разные платформы
-    // с разной областью действия ключей/моделей, а не просто зеркала одного бэкенда.
-    // Kimi K3 (вышла 16.07.2026) — замена K2.6, крупный апгрейд (2.8Т параметров, нативное
-    // зрение, окно 1М токенов). Дороже прежней K2.6, поэтому reasoning_effort зафиксирован на
-    // "high" (баланс скорости/цены/качества по рекомендации самой Moonshot), а не "max" —
-    // на max независимые тесты отмечают неоправданно большой расход токенов на рассуждения
-    // даже для простых вопросов.
-    const primary={url:"https://api.kimi.ai/v1/chat/completions", model:"kimi-k3"};
-    const mirrors=[
-      {url:"https://api.moonshot.ai/v1/chat/completions", model:"kimi-k3"},
-      {url:"https://api.moonshot.cn/v1/chat/completions", model:"kimi-k3"}
-    ];
-    async function tryEndpoint(url, model){
-      const kimiBody=JSON.stringify({model,reasoning_effort:"high",max_tokens:calcTokens(history),messages:[{role:"system",content:system},...history]});
-      const resp=await proxyFetch(url,{"Authorization":"Bearer "+cleanKey},kimiBody);
-      if(resp && resp.error) throw new Error(resp.error.message||JSON.stringify(resp.error));
-      return resp;
-    }
-    let d=null, lastErr=null, allErrs=[];
-    // Пробуем ВСЕ адреса по очереди, не сдаёмся на первой же "похожей на auth" ошибке — она
-    // может значить "неверный ключ ИМЕННО для этого домена/модели", а не "ключ вообще нерабочий".
-    for(const ep of [primary, ...mirrors]){
-      try{ d=await tryEndpoint(ep.url, ep.model); lastErr=null; break; }
-      catch(e){ lastErr=e.message; allErrs.push(ep.url+": "+e.message); }
-    }
-    if(!d){
-      throw new Error("Kimi не ответил ни с одного адреса. "+(allErrs.join(" | "))+". Проверь на platform.kimi.ai / platform.moonshot.ai: 1) ключ скопирован полностью, без пробелов и без 'Bearer '; 2) на счету есть реальное пополнение (не только ваучер) — Moonshot требует минимум $1; 3) модель kimi-k3 включена именно для этого ключа/проекта.");
-    }
-    return (d.choices[0].message.content||"").trim();
-  });
-}
-
-// Генерация/редактирование изображений через Gemini Nano Banana 2.1
-// (gemini-nano-banana-2.1) — тот же ключ Gemini, что уже используется для чата.
+// Генерация/редактирование изображений через Gemini 3.1 Flash Image ("Nano Banana 2",
+// gemini-3.1-flash-image-preview) — тот же ключ Gemini, что уже используется для чата.
 // Если передано исходное фото (imageFiles) — модель РЕДАКТИРУЕТ его по текстовому описанию
 // (например "сделай так, будто фасад облицован кирпичом"), а не рисует с нуля. Без фото —
 // обычная генерация картинки по тексту. Добавлено 11.09.2026.
@@ -3493,7 +3765,7 @@ async function generateGeminiImage(key, prompt, imageFiles){
     contents:[{role:"user", parts}],
     generationConfig:{responseModalities:["IMAGE","TEXT"]}
   };
-  const modelName="gemini-nano-banana-2.1";
+  const modelName="gemini-3.1-flash-image-preview";
   const d = await proxyFetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${key}`,{},payload);
   if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
   const cand=d.candidates && d.candidates[0];
@@ -3512,9 +3784,11 @@ async function callGemini(key, system, history){
   // (бенчмарк DeepSWE). Чистое обновление без доплаты, поэтому поставлена первой; 3.6-flash
   // и остальные оставлены как запасной вариант, если 3.8 будет недоступна/перегружена.
   const models=[
-    // 17.10.2026: по решению владельца используется только gemini-3.8-flash (запасная цепочка
-    // убрана: 3.5-flash устарела, 2.5-pro доступна ограниченно). 2 попытки на модель — ниже.
-    {name:"gemini-3.8-flash",       timeout:120000},
+    {name:"gemini-3.8-flash",       timeout:90000},
+    {name:"gemini-3.6-flash",       timeout:90000},
+    {name:"gemini-3.5-flash",       timeout:90000},
+    {name:"gemini-2.5-pro",         timeout:150000},
+    {name:"gemini-3.5-flash-lite",  timeout:60000},
   ];
   let lastErr=null;
   for(let mi=0;mi<models.length;mi++){
@@ -3612,7 +3886,7 @@ async function callPerplexity(key, system, history){
     // Подтверждённый формат из официального cookbook Perplexity (image-analysis example):
     // {"type":"input_text","text":"..."} и {"type":"input_image","image_url":"data:...;base64,..."}
     // (плоская строка, не вложенный объект как в старом chat/completions). Пресеты не гарантируют
-    // vision — для картинок явно переключаемся на подтверждённую в примере модель openai/gpt-6-luna
+    // vision — для картинок явно переключаемся на подтверждённую в примере модель openai/gpt-5.4
     // и вручную добавляем web_search, раз пресет тут не используется.
     const hasImages = fixedHistory.some(m=>Array.isArray(m.content)&&m.content.some(c=>c.type==="image_url"));
     const inputMessages = fixedHistory.map(function(m){
@@ -3633,7 +3907,7 @@ async function callPerplexity(key, system, history){
     // внимательно прочитать конкретное изображение (например, чертёж); инструмент мог отвлекать
     // модель на попытку что-то нагуглить вместо тщательного разбора самой картинки.
     const bodyObj = hasImages
-      ? {model:"openai/gpt-6-luna", instructions:system, input:inputMessages}
+      ? {model:"openai/gpt-5.4", instructions:system, input:inputMessages}
       : {preset:"fast", instructions:system, input:inputMessages};
     const pBody=JSON.stringify(bodyObj);
     // Perplexity API не отдаёт CORS-заголовки для браузерных запросов —
@@ -3665,16 +3939,11 @@ async function callDeepSeek(key, system, history, onChunk){
       // 16.08.2026, когда перед каждой картинкой добавляется подпись [Изображение: ...],
       // .find() находил бы только первую подпись, а настоящий вопрос пользователя (он всегда
       // последним текстовым блоком) терялся бы полностью.
-      // С 17.10.2026 (DeepSeek V4.1 Flash — нативно мультимодальная, формат image_url + base64
-      // data URL, картинки только в user-сообщениях): для user оставляем text и image_url блоки.
-      if(Array.isArray(m.content)){
-        if(m.role==="user" && m.content.some(c=>c.type==="image_url")) return {role:m.role,content:m.content.filter(c=>c.type==="text"||c.type==="image_url")};
-        return {role:m.role,content:m.content.filter(c=>c.type==="text").map(c=>c.text).join("\n")||""};
-      }
+      if(Array.isArray(m.content)) return {role:m.role,content:m.content.filter(c=>c.type==="text").map(c=>c.text).join("\n")||""};
       return m;
     });
     const stream=!isMobile;
-    const dsBody=JSON.stringify({model:"deepseek-flash",max_tokens:calcTokens(msgs),stream,messages:[{role:"system",content:system},...msgs]});
+    const dsBody=JSON.stringify({model:"deepseek-v4-flash",max_tokens:calcTokens(msgs),stream,messages:[{role:"system",content:system},...msgs]});
     if(isMobile){
       const d=await proxyFetch("https://api.deepseek.com/chat/completions",{"Authorization":"Bearer "+key},dsBody);
       if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
@@ -3711,7 +3980,7 @@ async function callDeepSeek(key, system, history, onChunk){
       // прямой запрос бессмысленно, откатываемся на прокси (без стриминга, зато доходит).
       // Если ошибка была не сетевая, а настоящая ошибка API (неверный ключ и т.п.) —
       // прокси всё равно вернёт ровно ту же ошибку, так что просто пробуем.
-      const dNoStream=JSON.stringify({model:"deepseek-flash",max_tokens:calcTokens(msgs),stream:false,messages:[{role:"system",content:system},...msgs]});
+      const dNoStream=JSON.stringify({model:"deepseek-v4-flash",max_tokens:calcTokens(msgs),stream:false,messages:[{role:"system",content:system},...msgs]});
       const d=await proxyFetch("https://api.deepseek.com/chat/completions",{"Authorization":"Bearer "+key},dNoStream);
       if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
       return d.choices[0].message.content.trim();
@@ -3774,6 +4043,32 @@ function detectImageShowRequest(text){
 // Рендерит блок с найденными изображениями прямо в чат (не текстом для AI, а как настоящие <img>)
 
 
+// ── Веб-поиск для Claude через Perplexity ─────────────────────
+async function webSearchForClaude(query){
+  if(!keys.perplexity) return null;
+  try{
+    const body={model:"sonar",max_tokens:500,messages:[
+      {role:"system",content:"Краткий поиск. Только факты и даты."},
+      {role:"user",content:query}
+    ]};
+    // Жёсткий таймаут 6 секунд — не блокируем основной поток
+    const timeout = new Promise((_,rej)=>setTimeout(()=>rej(new Error("search timeout")),6000));
+    let fetchPromise;
+    if(isMobile){
+      fetchPromise = proxyFetch("https://api.perplexity.ai/chat/completions",{"Authorization":"Bearer "+keys.perplexity},body);
+    } else {
+      fetchPromise = fetch("https://api.perplexity.ai/chat/completions",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":"Bearer "+keys.perplexity},
+        body:JSON.stringify(body)
+      }).then(r=>r.json());
+    }
+    const d = await Promise.race([fetchPromise, timeout]);
+    if(!d||d.error||!d.choices) return null;
+    return d.choices[0]?.message?.content||null;
+  }catch(e){ console.warn("webSearch failed:", e.message); return null; }
+}
+
 async function callAgent(agent, system, history, onChunk){
   const keys=getKeys();
   // Приоритет: healthMode system > обычный system + health-контекст если есть данные
@@ -3794,8 +4089,6 @@ async function callAgent(agent, system, history, onChunk){
     case "gemini":     return keys.gemini?callGemini(keys.gemini,effectiveSystem,history):Promise.reject(new Error("Добавь ключ Gemini в ⚙️ Настройки → aistudio.google.com (бесплатно)"));
     case "perplexity": return keys.perplexity?callPerplexity(keys.perplexity,effectiveSystem,history):Promise.reject(new Error("Добавь ключ Perplexity в ⚙️ Настройки → perplexity.ai/settings/api"));
     case "deepseek":   return keys.deepseek?callDeepSeek(keys.deepseek,effectiveSystem,history,onChunk):Promise.reject(new Error("Добавь ключ DeepSeek в ⚙️ Настройки → platform.deepseek.com"));
-    case "kimi":       return keys.kimi?callKimi(keys.kimi,effectiveSystem,history):Promise.reject(new Error("Добавь ключ Kimi в ⚙️ Настройки → platform.kimi.ai"));
-    case "gpt":        return keys.gpt?callOpenAI(keys.gpt,effectiveSystem,history):Promise.reject(new Error("Добавь ключ GPT-4o в ⚙️ Настройки → platform.openai.com"));
   }
 }
 
@@ -4056,28 +4349,24 @@ var __voiceChunks = [];
 var __voiceStream = null;
 
 async function toggleVoiceRecording(){
-  if(typeof __logErr==="function") __logErr("voice", "клик по микрофону; mediaDevices="+(!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia))+", secure="+window.isSecureContext+", MediaRecorder="+(typeof MediaRecorder));
   const btn = document.getElementById("micBtn");
   if(__voiceRecorder && __voiceRecorder.state==="recording"){
     __voiceRecorder.stop(); // остальное доделает onstop
     return;
   }
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-    if(typeof __logErr==="function") __logErr("voice", "нет mediaDevices.getUserMedia");
-    alert("Браузер не даёт доступ к микрофону (нужен https и разрешение для сайта).");
+    showToast("⚠️ Браузер не поддерживает запись с микрофона");
     return;
   }
   const gptKey = (typeof getKeys==="function" ? getKeys().gpt : null);
   if(!gptKey){
-    if(typeof __logErr==="function") __logErr("voice", "нет ключа OpenAI на этом устройстве");
-    alert("Для голосового ввода нужен ключ OpenAI. На этом устройстве его нет: войди в аккаунт (ключи подтянутся из облака) или введи его в ⚙️ Настройки.");
+    showToast("⚠️ Для голосового ввода нужен ключ OpenAI в ⚙️ Настройки");
     return;
   }
   try{
     __voiceStream = await navigator.mediaDevices.getUserMedia({audio:true});
   }catch(permErr){
-    if(typeof __logErr==="function") __logErr("voice", "getUserMedia: "+(permErr.name||"")+" "+(permErr.message||""));
-    alert("Нет доступа к микрофону: "+(permErr.name||"")+" "+(permErr.message||"")+"\n\nВ Firefox: значок замка слева от адреса → Разрешения → Микрофон → Разрешить. Также проверь разрешение для Firefox в настройках Android.");
+    showToast("⚠️ Нет доступа к микрофону: "+permErr.message);
     return;
   }
   __voiceChunks = [];
@@ -4105,8 +4394,7 @@ async function toggleVoiceRecording(){
         showToast("⚠️ Не удалось распознать речь");
       }
     }catch(voiceErr){
-      if(typeof __logErr==="function") __logErr("voice", "распознавание: "+(voiceErr.message||voiceErr));
-      alert("Ошибка распознавания речи: "+(voiceErr.message||voiceErr));
+      showToast("⚠️ Ошибка распознавания: "+voiceErr.message);
     }
   };
   __voiceRecorder.start();
@@ -4114,284 +4402,187 @@ async function toggleVoiceRecording(){
   showToast("🎙️ Идёт запись... нажми ещё раз, чтобы остановить");
 }
 
-// ── Загрузка файлов: статус каждого файла виден сразу после выбора ──────────────
-// Раньше превью появлялось только после обработки ВСЕХ файлов сразу, обрабатывались они
-// параллельно (OCR/PDF на телефоне вешали друг друга), а ошибка чтения или исключение внутри
-// обработки не давали счётчику дойти до конца — превью не появлялось вообще, а кнопка отправки
-// после неудачного OCR оставалась заблокированной. Теперь: карточка файла появляется сразу
-// (в очереди → читаю → готов / предупреждение / ошибка), файлы обрабатываются по очереди,
-// любая ошибка видна на карточке, а отправка ждёт окончания обработки.
-let fileJobs = [];            // файлы в очереди / в обработке / с ошибкой чтения
-let fileJobSeq = 0;
-let fileQueue = Promise.resolve();
-const FILE_JOB_TIMEOUT_MS = 150000;
-
-function filesBusy(){
-  if(fileJobs.some(j=>j.state==="queued"||j.state==="loading")){
-    showToast("⏳ Подожди — файлы ещё обрабатываются");
-    return true;
-  }
-  return false;
-}
-
-function jobNote(job, msg){
-  job.msg = msg;
-  job.warn = /^(⚠️|❌)/.test(msg);
-  renderFilePreview();
-}
-
-function readFileAsDataUrl(f){
-  return new Promise(function(resolve, reject){
-    const r = new FileReader();
-    r.onload = function(){ resolve(r.result); };
-    r.onerror = function(){ reject(r.error || new Error("не удалось прочитать файл")); };
-    r.readAsDataURL(f);
-  });
-}
-
 function handleFiles(input){
-  const files = Array.from(input.files);
-  // Сбрасываем поле выбора, чтобы можно было выбрать тот же файл ещё раз.
-  // (files — уже копия массива, сброс input.files ей не мешает.)
-  try{ input.value = ""; }catch(e){}
+  const files=Array.from(input.files);
   if(!files.length) return;
-  // Файлы НАКАПЛИВАЮТСЯ, а не заменяются — важно для мобильных браузеров (особенно Firefox),
-  // где нативный диалог выбора часто не даёт выделить сразу несколько файлов, и пользователь
-  // прикрепляет их по одному через повторные нажатия на 📎.
-  const active = fileJobs.filter(j=>j.state==="queued"||j.state==="loading").length;
-  if(currentFiles.length+active+files.length>10){
-    alert("Максимум 10 файлов (уже прикреплено: "+(currentFiles.length+active)+")");
-    return;
-  }
-  files.forEach(function(f){
-    if(f.size>20*1024*1024){
-      fileJobs.push({id:++fileJobSeq,name:f.name,size:f.size,state:"error",msg:"❌ Слишком большой (макс 20 МБ)"});
-      return;
-    }
-    const dup = currentFiles.some(x=>x.name===f.name&&x.size===f.size) ||
-                fileJobs.some(j=>j.name===f.name&&j.size===f.size&&j.state!=="error");
-    if(dup){ showToast("ℹ️ «"+f.name+"» уже прикреплён"); return; }
-    const job = {id:++fileJobSeq,name:f.name,size:f.size,state:"queued",msg:"В очереди…"};
-    fileJobs.push(job);
-    fileQueue = fileQueue.then(function(){ return runFileJob(f, job); });
-  });
-  renderFilePreview();
-}
-
-async function runFileJob(f, job){
-  if(job.cancelled) return;
-  job.state = "loading";
-  jobNote(job, "Читаю файл…");
-  let timer;
-  try{
-    const dataUrl = await readFileAsDataUrl(f);
-    if(job.cancelled) return;
-    const timeout = new Promise(function(_, reject){
-      timer = setTimeout(function(){ reject(new Error("TIMEOUT")); }, FILE_JOB_TIMEOUT_MS);
-    });
-    let obj = null;
-    try{
-      obj = await Promise.race([processFileJob(f, dataUrl, job), timeout]);
-    }catch(procErr){
-      // Сам файл уже прочитан — даже если обработка (OCR/PDF/...) упала или зависла,
-      // прикрепляем файл как есть, но с видимым предупреждением, а не теряем его молча.
-      obj = job.obj;
-      if(!obj) throw procErr;
-      job.abandoned = true;
-      jobNote(job, (procErr && procErr.message==="TIMEOUT")
-        ? "⚠️ Обработка заняла слишком долго — файл добавлен без извлечённого текста"
-        : "⚠️ Ошибка обработки ("+(procErr && procErr.message || procErr)+") — файл добавлен как есть");
-    }
-    if(job.cancelled) return;
-    obj.statusState = job.warn ? "warn" : "done";
-    obj.statusMsg = (job.msg && job.msg!=="Читаю файл…") ? job.msg : "✅ Готов";
-    currentFiles.push(obj);
-    fileJobs = fileJobs.filter(function(j){ return j!==job; });
-  }catch(err){
-    job.state = "error";
-    job.msg = "❌ "+(err && err.message || err);
-  }finally{
-    clearTimeout(timer);
-    renderFilePreview();
-  }
-}
-
-async function processFileJob(f, dataUrl, job){
-  let b64=dataUrl.split(",")[1];
-  const obj={name:f.name,type:f.type||"application/octet-stream",b64,size:f.size,text:null};
-  job.obj=obj;
-  if(f.type.startsWith("image/")){
-    // Сжимаем изображение перед отправкой, чтобы не упереться в лимит 4.5MB у серверного прокси
-    // (актуально для фото прямо с камеры телефона, которые легко весят 5-10+ МБ)
-    try{
-      const compressed = await compressImage(dataUrl, 1600, 0.82);
-      const compressedB64 = compressed.split(",")[1];
-      b64 = compressedB64;
-      obj.b64 = compressedB64;
-      obj.type = "image/jpeg";
-    }catch(compressErr){ /* если сжатие не удалось — отправляем оригинал как раньше */ }
-  }
-  if(f.type==="application/pdf"){
-    jobNote(job,"📄 Читаю PDF: "+f.name);
-    const pdfResult=await extractPdfText(b64);
-    const txt=pdfResult.text;
-    if(txt) obj.text=txt;
-    jobNote(job,txt?"✅ PDF прочитан":"⚠️ PDF: текст не извлечён");
-    const claudeKeyForVision=getKeys().claude;
-    // Случай 1: страницы БЕЗ текстового слоя вообще (сканы, дизайнерские карточки) —
-    // рендерим целиком одной картинкой, этого обычно достаточно.
-    if(pdfResult.emptyPages && pdfResult.emptyPages.length){
-      try{
-        jobNote(job,"🖼️ Стр. "+pdfResult.emptyPages.join(", ")+" без текста — рендерю как изображение...");
-        const pageImages=await renderPdfPagesAsImages(b64,pdfResult.emptyPages);
-        for(const img of pageImages){
-          if(job.abandoned||job.cancelled) break;
-          currentFiles.push({name:f.name+" — стр."+img.page,type:"image/jpeg",b64:img.b64,size:Math.round(img.b64.length*0.75),text:null});
-          // Платную авто-расшифровку через Claude Vision делаем именно для этих страниц —
-          // текстового слоя у них нет вообще, запасного контекста иначе не будет.
-          if(claudeKeyForVision){
-            const visionTxt=await transcribePageWithVision(claudeKeyForVision,img.b64,"image/jpeg");
-            if(visionTxt) obj.text=(obj.text||"")+"\n--- Стр."+img.page+" (распознано Vision AI) ---\n"+visionTxt;
+  if(files.length>10){alert("Максимум 10 файлов");return;}
+  currentFiles=[];
+  document.getElementById("filePreview").style.display="none";
+  let loaded=0;
+  files.forEach(f=>{
+    if(f.size>20*1024*1024){showToast("⚠️ "+f.name+" слишком большой (макс 20MB)");loaded++;if(loaded===files.length)renderFilePreview();return;}
+    const reader=new FileReader();
+    reader.onload=async e=>{
+      let b64=e.target.result.split(",")[1];
+      const obj={name:f.name,type:f.type||"application/octet-stream",b64,size:f.size,text:null};
+      if(f.type.startsWith("image/")){
+        // Сжимаем изображение перед отправкой, чтобы не упереться в лимит 4.5MB у серверного прокси
+        // (актуально для фото прямо с камеры телефона, которые легко весят 5-10+ МБ)
+        try{
+          const compressed = await compressImage(e.target.result, 1600, 0.82);
+          const compressedB64 = compressed.split(",")[1];
+          b64 = compressedB64;
+          obj.b64 = compressedB64;
+          obj.type = "image/jpeg";
+        }catch(compressErr){ /* если сжатие не удалось — отправляем оригинал как раньше */ }
+      }
+      if(f.type==="application/pdf"){
+        showToast("📄 Читаю PDF: "+f.name);
+        const pdfResult=await extractPdfText(b64);
+        const txt=pdfResult.text;
+        if(txt) obj.text=txt;
+        showToast(txt?"✅ PDF прочитан":"⚠️ PDF: текст не извлечён");
+        const claudeKeyForVision=getKeys().claude;
+        // Случай 1: страницы БЕЗ текстового слоя вообще (сканы, дизайнерские карточки) —
+        // рендерим целиком одной картинкой, этого обычно достаточно.
+        if(pdfResult.emptyPages && pdfResult.emptyPages.length){
+          try{
+            showToast("🖼️ Стр. "+pdfResult.emptyPages.join(", ")+" без текста — рендерю как изображение...");
+            const pageImages=await renderPdfPagesAsImages(b64,pdfResult.emptyPages);
+            for(const img of pageImages){
+              currentFiles.push({name:f.name+" — стр."+img.page,type:"image/jpeg",b64:img.b64,size:Math.round(img.b64.length*0.75),text:null});
+              // Платную авто-расшифровку через Claude Vision делаем именно для этих страниц —
+              // текстового слоя у них нет вообще, запасного контекста иначе не будет.
+              if(claudeKeyForVision){
+                const visionTxt=await transcribePageWithVision(claudeKeyForVision,img.b64,"image/jpeg");
+                if(visionTxt) obj.text=(obj.text||"")+"\n--- Стр."+img.page+" (распознано Vision AI) ---\n"+visionTxt;
+              }
+            }
+            if(pageImages.length) showToast("✅ Добавлено "+pageImages.length+" стр. как изображения");
+          }catch(pe){ /* тихо пропускаем, если рендер/распознавание страниц не удался */ }
+        }
+        // Случай 2: чертёж крупного формата (drawingPages, см. extractPdfText) — целиком одной
+        // картинкой мелкий текст/размеры не разобрать (vision-API сами сжимают картинку перед
+        // анализом), поэтому режем на тайлы через renderDrawingPageTiles — каждый тайл остаётся
+        // читаемым. Платную Vision-расшифровку сюда не гоняем: тайлов может быть много (до 12 на
+        // файл), это будет дорого — саму картинку(и) разберёт агент, отвечающий на вопрос.
+        if(pdfResult.drawingPages && pdfResult.drawingPages.length){
+          try{
+            showToast("🖼️ Стр. "+pdfResult.drawingPages.join(", ")+" — чертёж крупного формата, режу на тайлы...");
+            const tiles=await renderDrawingPageTiles(b64,pdfResult.drawingPages);
+            for(const tile of tiles){
+              currentFiles.push({name:f.name+" — стр."+tile.page+", "+tile.tileLabel,type:"image/jpeg",b64:tile.b64,size:Math.round(tile.b64.length*0.75),text:null});
+            }
+            if(tiles.length) showToast("✅ Добавлено "+tiles.length+" тайлов чертежа — агент с vision разберёт их напрямую");
+          }catch(pe){ /* тихо пропускаем, если рендер тайлов не удался */ }
+        }
+      } else if(f.type.startsWith("image/")){
+        const sendBtn=document.getElementById("sendBtn");
+        if(sendBtn){sendBtn.disabled=true;sendBtn.textContent="⏳";sendBtn.style.background="#374151";}
+        showToast("🔍 OCR: "+f.name);
+        const txt=await extractImageTextOCR(b64,f.type);
+        if(txt) obj.text="[OCR текст]\n"+txt;
+        if(sendBtn){sendBtn.disabled=false;sendBtn.textContent="↑";sendBtn.style.background="linear-gradient(135deg,#6366f1,#8b5cf6)";}
+        showToast(txt?"✅ OCR: "+txt.length+" символов":"⚠️ Текст не распознан (визуальный анализ через AI)");
+      } else if(f.name.endsWith(".docx")||f.type==="application/vnd.openxmlformats-officedocument.wordprocessingml.document"){
+        // Читаем DOCX через mammoth
+        showToast("📄 Читаю DOCX: "+f.name);
+        try{
+          if(window.mammoth){
+            const arrBuf=await f.arrayBuffer();
+            const result=await mammoth.extractRawText({arrayBuffer:arrBuf});
+            if(result.value && result.value.length>10){
+              obj.text=result.value;
+              showToast("✅ DOCX прочитан: "+result.value.length+" символов");
+            } else {
+              showToast("⚠️ DOCX: текст не извлечён");
+            }
+          } else {
+            // Mammoth не загружен — пробуем base64 decode
+            try{ obj.text = decodeURIComponent(escape(atob(b64))); }catch(e){}
+            showToast("⚠️ Mammoth не загружен — частичное чтение");
           }
-        }
-        if(pageImages.length) jobNote(job,"✅ Добавлено "+pageImages.length+" стр. как изображения");
-      }catch(pe){ /* тихо пропускаем, если рендер/распознавание страниц не удался */ }
-    }
-    // Случай 2: чертёж крупного формата (drawingPages, см. extractPdfText) — целиком одной
-    // картинкой мелкий текст/размеры не разобрать (vision-API сами сжимают картинку перед
-    // анализом), поэтому режем на тайлы через renderDrawingPageTiles — каждый тайл остаётся
-    // читаемым. Платную Vision-расшифровку сюда не гоняем: тайлов может быть много (до 12 на
-    // файл), это будет дорого — саму картинку(и) разберёт агент, отвечающий на вопрос.
-    if(pdfResult.drawingPages && pdfResult.drawingPages.length){
-      try{
-        jobNote(job,"🖼️ Стр. "+pdfResult.drawingPages.join(", ")+" — чертёж крупного формата, режу на тайлы...");
-        const tiles=await renderDrawingPageTiles(b64,pdfResult.drawingPages);
-        for(const tile of tiles){
-          if(job.abandoned||job.cancelled) break;
-          currentFiles.push({name:f.name+" — стр."+tile.page+", "+tile.tileLabel,type:"image/jpeg",b64:tile.b64,size:Math.round(tile.b64.length*0.75),text:null});
-        }
-        if(tiles.length) jobNote(job,"✅ Добавлено "+tiles.length+" тайлов чертежа — агент с vision разберёт их напрямую");
-      }catch(pe){ /* тихо пропускаем, если рендер тайлов не удался */ }
-    }
-  } else if(f.type.startsWith("image/")){
-    jobNote(job,"🔍 Распознаю текст на изображении (OCR)…");
-    let txt="";
-    try{ txt=await extractImageTextOCR(b64,f.type); }catch(ocrErr){ txt=""; }
-    if(txt) obj.text="[OCR текст]\n"+txt;
-    jobNote(job, txt ? "✅ OCR: "+txt.length+" симв." : "ℹ️ Текста на изображении нет — его разберёт AI напрямую");
-  } else if(f.name.endsWith(".docx")||f.type==="application/vnd.openxmlformats-officedocument.wordprocessingml.document"){
-    // Читаем DOCX через mammoth
-    jobNote(job,"📄 Читаю DOCX: "+f.name);
-    try{
-      if(window.mammoth){
-        const arrBuf=await f.arrayBuffer();
-        const result=await mammoth.extractRawText({arrayBuffer:arrBuf});
-        if(result.value && result.value.length>10){
-          obj.text=result.value;
-          jobNote(job,"✅ DOCX прочитан: "+result.value.length+" символов");
-        } else {
-          jobNote(job,"⚠️ DOCX: текст не извлечён");
-        }
-      } else {
-        // Mammoth не загружен — пробуем base64 decode
-        try{ obj.text = decodeURIComponent(escape(atob(b64))); }catch(e){}
-        jobNote(job,"⚠️ Mammoth не загружен — частичное чтение");
+        }catch(docxErr){ showToast("⚠️ Ошибка чтения DOCX: "+docxErr.message); }
+      } else if(f.name.endsWith(".doc")||f.type==="application/msword"){
+        showToast("⚠️ Формат .doc не поддерживается. Сохрани как .docx");
+      } else if(f.name.endsWith(".pptx")||f.type==="application/vnd.openxmlformats-officedocument.presentationml.presentation"){
+        // Читаем PPTX как ZIP-архив через JSZip, вытаскиваем текст из XML каждого слайда
+        showToast("📽️ Читаю PPTX: "+f.name);
+        try{
+          if(window.JSZip){
+            const arrBuf=await f.arrayBuffer();
+            const zip=await JSZip.loadAsync(arrBuf);
+            const slideFiles=Object.keys(zip.files)
+              .filter(n=>/^ppt\/slides\/slide\d+\.xml$/.test(n))
+              .sort((a,b)=>{
+                const na=parseInt(a.match(/(\d+)/)[1],10), nb=parseInt(b.match(/(\d+)/)[1],10);
+                return na-nb;
+              });
+            let text="";
+            for(let i=0;i<slideFiles.length;i++){
+              const xml=await zip.files[slideFiles[i]].async("text");
+              // Текстовые куски лежат в тегах <a:t>...</a:t>
+              const matches=[...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m=>m[1]);
+              const slideText=matches.join(" ").replace(/\s+/g," ").trim();
+              if(slideText) text+="[Слайд "+(i+1)+"]\n"+slideText+"\n\n";
+            }
+            // Заметки к слайдам (speaker notes) — тоже полезны для контекста
+            const notesFiles=Object.keys(zip.files).filter(n=>/^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(n));
+            for(const nf of notesFiles){
+              const xml=await zip.files[nf].async("text");
+              const matches=[...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m=>m[1]);
+              const noteText=matches.join(" ").replace(/\s+/g," ").trim();
+              if(noteText) text+="[Заметки к слайду]\n"+noteText+"\n\n";
+            }
+            if(text.trim().length>5){
+              obj.text=text.slice(0,20000);
+              showToast("✅ PPTX прочитан: "+slideFiles.length+" слайдов");
+            } else {
+              showToast("⚠️ PPTX: текст не найден (возможно, только изображения/графика)");
+            }
+          } else {
+            showToast("⚠️ JSZip не загружен — PPTX не прочитан");
+          }
+        }catch(pptxErr){ showToast("⚠️ Ошибка чтения PPTX: "+pptxErr.message); }
+      } else if(f.type.startsWith("audio/")||/\.(mp3|mp4|mpeg|mpga|m4a|wav|webm)$/i.test(f.name)){
+        // Whisper (OpenAI) официально принимает только: mp3, mp4, mpeg, mpga, m4a, wav, webm.
+        // Форматы вроде .ogg/.opus/.amr/.3gp (частые для голосовых с телефона) им не поддерживаются —
+        // такие файлы просто не попадают в эту ветку и не тратят впустую вызов API.
+        showToast("🎙️ Распознаю аудио: "+f.name);
+        try{
+          const audioBlob = new Blob([Uint8Array.from(atob(b64),c=>c.charCodeAt(0))], {type:f.type||"audio/mpeg"});
+          const text = await transcribeWithWhisper(audioBlob, f.name, f.type||"audio/mpeg");
+          if(text){
+            obj.text = "[Расшифровка аудио \""+f.name+"\"]\n"+text;
+            showToast("✅ Аудио распознано ("+text.length+" симв.)");
+          } else {
+            showToast("⚠️ Не удалось распознать речь в аудио");
+          }
+        }catch(audioErr){ showToast("⚠️ Ошибка распознавания аудио: "+audioErr.message); }
+      } else if(f.name.endsWith(".xlsx")||f.name.endsWith(".xls")||
+                f.type==="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"||
+                f.type==="application/vnd.ms-excel"){
+        // Читаем Excel через SheetJS
+        showToast("📊 Читаю Excel: "+f.name);
+        try{
+          if(window.XLSX){
+            const arrBuf=await f.arrayBuffer();
+            const wb=XLSX.read(arrBuf,{type:"array"});
+            let text="";
+            wb.SheetNames.forEach(function(sheetName){
+              const ws=wb.Sheets[sheetName];
+              const csv=XLSX.utils.sheet_to_csv(ws,{blankrows:false});
+              if(csv.trim()) text+="[Лист: "+sheetName+"]\n"+csv+"\n\n";
+            });
+            if(text.trim().length>10){
+              obj.text=text.slice(0,15000); // ограничиваем контекст
+              showToast("✅ Excel прочитан: "+wb.SheetNames.length+" листов");
+            } else {
+              showToast("⚠️ Excel: данные не извлечены");
+            }
+          } else {
+            showToast("⚠️ XLSX библиотека не загружена");
+          }
+        }catch(xlsxErr){ showToast("⚠️ Ошибка чтения Excel: "+xlsxErr.message); }
+      } else if(f.type.startsWith("text/")||/\.(txt|md|csv|py|js|jsx|ts|tsx|json|html|htm|css|scss|java|c|cpp|h|hpp|go|rb|php|sql|yaml|yml|sh|bash|xml|log|ini|toml|env|gitignore|dockerfile|rs|kt|swift|r|m)$/i.test(f.name)){
+        try{obj.text=atob(b64);}catch(e){}
       }
-    }catch(docxErr){ jobNote(job,"⚠️ Ошибка чтения DOCX: "+docxErr.message); }
-  } else if(f.name.endsWith(".doc")||f.type==="application/msword"){
-    jobNote(job,"⚠️ Формат .doc не поддерживается. Сохрани как .docx");
-  } else if(f.name.endsWith(".pptx")||f.type==="application/vnd.openxmlformats-officedocument.presentationml.presentation"){
-    // Читаем PPTX как ZIP-архив через JSZip, вытаскиваем текст из XML каждого слайда
-    jobNote(job,"📽️ Читаю PPTX: "+f.name);
-    try{
-      if(window.JSZip){
-        const arrBuf=await f.arrayBuffer();
-        const zip=await JSZip.loadAsync(arrBuf);
-        const slideFiles=Object.keys(zip.files)
-          .filter(n=>/^ppt\/slides\/slide\d+\.xml$/.test(n))
-          .sort((a,b)=>{
-            const na=parseInt(a.match(/(\d+)/)[1],10), nb=parseInt(b.match(/(\d+)/)[1],10);
-            return na-nb;
-          });
-        let text="";
-        for(let i=0;i<slideFiles.length;i++){
-          const xml=await zip.files[slideFiles[i]].async("text");
-          // Текстовые куски лежат в тегах <a:t>...</a:t>
-          const matches=[...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m=>m[1]);
-          const slideText=matches.join(" ").replace(/\s+/g," ").trim();
-          if(slideText) text+="[Слайд "+(i+1)+"]\n"+slideText+"\n\n";
-        }
-        // Заметки к слайдам (speaker notes) — тоже полезны для контекста
-        const notesFiles=Object.keys(zip.files).filter(n=>/^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(n));
-        for(const nf of notesFiles){
-          const xml=await zip.files[nf].async("text");
-          const matches=[...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m=>m[1]);
-          const noteText=matches.join(" ").replace(/\s+/g," ").trim();
-          if(noteText) text+="[Заметки к слайду]\n"+noteText+"\n\n";
-        }
-        if(text.trim().length>5){
-          obj.text=text.slice(0,20000);
-          jobNote(job,"✅ PPTX прочитан: "+slideFiles.length+" слайдов");
-        } else {
-          jobNote(job,"⚠️ PPTX: текст не найден (возможно, только изображения/графика)");
-        }
-      } else {
-        jobNote(job,"⚠️ JSZip не загружен — PPTX не прочитан");
-      }
-    }catch(pptxErr){ jobNote(job,"⚠️ Ошибка чтения PPTX: "+pptxErr.message); }
-  } else if(f.type.startsWith("audio/")||/\.(mp3|mp4|mpeg|mpga|m4a|wav|webm)$/i.test(f.name)){
-    // Whisper (OpenAI) официально принимает только: mp3, mp4, mpeg, mpga, m4a, wav, webm.
-    // Форматы вроде .ogg/.opus/.amr/.3gp (частые для голосовых с телефона) им не поддерживаются —
-    // такие файлы просто не попадают в эту ветку и не тратят впустую вызов API.
-    jobNote(job,"🎙️ Распознаю аудио: "+f.name);
-    try{
-      const audioBlob = new Blob([Uint8Array.from(atob(b64),c=>c.charCodeAt(0))], {type:f.type||"audio/mpeg"});
-      const text = await transcribeWithWhisper(audioBlob, f.name, f.type||"audio/mpeg");
-      if(text){
-        obj.text = "[Расшифровка аудио \""+f.name+"\"]\n"+text;
-        jobNote(job,"✅ Аудио распознано ("+text.length+" симв.)");
-      } else {
-        jobNote(job,"⚠️ Не удалось распознать речь в аудио");
-      }
-    }catch(audioErr){ jobNote(job,"⚠️ Ошибка распознавания аудио: "+audioErr.message); }
-  } else if(f.name.endsWith(".xlsx")||f.name.endsWith(".xls")||
-            f.type==="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"||
-            f.type==="application/vnd.ms-excel"){
-    // Читаем Excel через SheetJS
-    jobNote(job,"📊 Читаю Excel: "+f.name);
-    try{
-      if(window.XLSX){
-        const arrBuf=await f.arrayBuffer();
-        const wb=XLSX.read(arrBuf,{type:"array"});
-        let text="";
-        wb.SheetNames.forEach(function(sheetName){
-          const ws=wb.Sheets[sheetName];
-          const csv=XLSX.utils.sheet_to_csv(ws,{blankrows:false});
-          if(csv.trim()) text+="[Лист: "+sheetName+"]\n"+csv+"\n\n";
-        });
-        if(text.trim().length>10){
-          obj.text=text.slice(0,15000); // ограничиваем контекст
-          jobNote(job,"✅ Excel прочитан: "+wb.SheetNames.length+" листов");
-        } else {
-          jobNote(job,"⚠️ Excel: данные не извлечены");
-        }
-      } else {
-        jobNote(job,"⚠️ XLSX библиотека не загружена");
-      }
-    }catch(xlsxErr){ jobNote(job,"⚠️ Ошибка чтения Excel: "+xlsxErr.message); }
-  } else if(f.type.startsWith("text/")||/\.(txt|md|csv|py|js|jsx|ts|tsx|json|html|htm|css|scss|java|c|cpp|h|hpp|go|rb|php|sql|yaml|yml|sh|bash|xml|log|ini|toml|env|gitignore|dockerfile|rs|kt|swift|r|m)$/i.test(f.name)){
-    try{obj.text=atob(b64);}catch(e){}
-    jobNote(job, obj.text ? "✅ Прочитан ("+obj.text.length+" симв.)" : "⚠️ Не удалось прочитать как текст");
-  }
-  return obj;
-}
-
-function removeJob(id){
-  const j = fileJobs.find(function(x){ return x.id===id; });
-  if(j) j.cancelled = true;
-  fileJobs = fileJobs.filter(function(x){ return x.id!==id; });
-  if(!currentFiles.length && !fileJobs.length){ document.getElementById("fileInput").value=""; }
-  renderFilePreview();
+      currentFiles.push(obj);
+      loaded++;
+      if(loaded===files.length) renderFilePreview();
+    };
+    reader.readAsDataURL(f);
+  });
 }
 
 function detectMedDocType(filename, text){
@@ -4908,56 +5099,46 @@ async function extractBiomarkersWithAI(apiKey, filename, text, docType, cardId){
   }
 }
 
-function fileStatusHtml(state, msg){
-  const color = state==="done" ? "#16a34a" : state==="warn" ? "#b45309" : state==="error" ? "#dc2626" : "#6366f1";
-  const pulse = (state==="queued"||state==="loading") ? " class='pulse'" : "";
-  return "<div"+pulse+" style='font-size:10px;color:"+color+";white-space:normal;word-break:break-word'>"+escHtml(msg||"")+"</div>";
-}
-
 function renderFilePreview(){
   const p=document.getElementById("filePreview");
-  if(!currentFiles.length && !fileJobs.length){p.style.display="none";p.innerHTML="";return;}
+  if(!currentFiles.length){p.style.display="none";p.innerHTML="";return;}
   p.style.display="flex";
-  const fileIcon=function(type){
-    type=type||"";
-    return type.startsWith("image/")?"🖼️":type==="application/pdf"?"📄":type.includes("word")?"📝":type.includes("sheet")?"📊":"📎";
-  };
-  const rowHtml=function(icon,name,size,statusHtml,removeCall){
-    return "<div style='display:flex;align-items:flex-start;gap:8px'>"
+  const rows=currentFiles.map((f,i)=>{
+    const icon=f.type.startsWith("image/")?"🖼️":f.type==="application/pdf"?"📄":f.type.includes("word")?"📝":f.type.includes("sheet")?"📊":"📎";
+    return "<div style='display:flex;align-items:center;gap:8px'>"
       +"<span style='font-size:18px;flex-shrink:0'>"+icon+"</span>"
       +"<div style='flex:1;min-width:0'>"
-        +"<div style='font-size:12px;font-weight:600;color:#4f46e5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>"+escHtml(name)+"</div>"
-        +"<div style='font-size:10px;color:#6b7280'>"+(size/1024).toFixed(0)+" KB</div>"
-        +statusHtml
+        +"<div style='font-size:12px;font-weight:600;color:#4f46e5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>"+escHtml(f.name)+"</div>"
+        +"<div style='font-size:10px;color:#6b7280'>"+(f.size/1024).toFixed(0)+" KB</div>"
       +"</div>"
-      +"<button onclick='"+removeCall+"' title='Удалить файл' style='background:none;border:none;color:#6b7280;cursor:pointer;font-size:16px;flex-shrink:0;padding:0 2px'>✕</button>"
+      +"<button onclick='removeFile("+i+")' title='Удалить файл' style='background:none;border:none;color:#6b7280;cursor:pointer;font-size:16px;flex-shrink:0;padding:0 2px'>✕</button>"
     +"</div>";
-  };
-  const readyRows=currentFiles.map(function(f,i){
-    return rowHtml(fileIcon(f.type), f.name, f.size,
-      f.statusMsg ? fileStatusHtml(f.statusState||"done", f.statusMsg) : "", "removeFile("+i+")");
   }).join("");
-  const jobRows=fileJobs.map(function(j){
-    return rowHtml("⏳", j.name, j.size, fileStatusHtml(j.warn?"warn":j.state, j.msg), "removeJob("+j.id+")");
-  }).join("");
-  const total=currentFiles.length+fileJobs.length;
-  const clearAll=total>1
-    ? "<button onclick='clearFiles()' style='align-self:flex-end;background:none;border:none;color:#94a3b8;font-size:11px;cursor:pointer;text-decoration:underline;padding:0'>Очистить все ("+total+")</button>"
+  const clearAll=currentFiles.length>1
+    ? "<button onclick='clearFiles()' style='align-self:flex-end;background:none;border:none;color:#94a3b8;font-size:11px;cursor:pointer;text-decoration:underline;padding:0'>Очистить все ("+currentFiles.length+")</button>"
     : "";
-  const visionWarning="";
-  p.innerHTML=readyRows+jobRows+clearAll+visionWarning;
+  // Предупреждение о DeepSeek: он не умеет видеть изображения (только текст, см. callDeepSeek).
+  // Если сейчас реально может ответить ИМЕННО и ТОЛЬКО DeepSeek (Быстрый режим с ним выбранным),
+  // предупреждаем заранее, а не постфактум, когда придёт выдуманный ответ.
+  const hasImages=currentFiles.some(f=>f.type.startsWith("image/")||f.type==="application/pdf");
+  let visionWarning="";
+  if(hasImages){
+    const quickSel=document.getElementById("quickAgent");
+    if(quickMode && quickSel && quickSel.value==="deepseek"){
+      visionWarning="<div style='font-size:11px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 8px'>⚠️ DeepSeek не видит изображения/чертежи — только извлечённый текст. Для этого файла выбери другого агента.</div>";
+    }
+  }
+  p.innerHTML=rows+clearAll+visionWarning;
 }
 
 function removeFile(i){
   currentFiles.splice(i,1);
-  if(!currentFiles.length && !fileJobs.length){document.getElementById("fileInput").value="";}
+  if(!currentFiles.length){document.getElementById("fileInput").value="";}
   renderFilePreview();
 }
 
 function clearFiles(){
   currentFiles=[];
-  fileJobs.forEach(function(j){ j.cancelled=true; });
-  fileJobs=[];
   document.getElementById("fileInput").value="";
   document.getElementById("filePreview").style.display="none";
   document.getElementById("filePreview").innerHTML="";
@@ -5037,7 +5218,7 @@ function toggleChainMode(){
     if(qb){ qb.style.background="#f1f5f9"; qb.style.color="#475569"; qb.style.borderColor="#e2e8f0"; }
   }
   if(chainMode && imageGenMode) toggleImageGenMode();
-  showToast(chainMode ? "🔗 Цепочка включена: Perplexity→Gemini→Kimi→GPT→GLM→DeepSeek" : "🔗 Цепочка выключена");
+  showToast(chainMode ? "🔗 Цепочка включена: Perplexity→Gemini→GLM→DeepSeek" : "🔗 Цепочка выключена");
 }
 
 
@@ -5186,13 +5367,16 @@ async function sendQuick(text, inp){
       imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
       content.push({type:"text",text:enrichedMsg});
       agentHistory=[...history.slice(0,-1),{role:"user",content}];
-    } else if(["gpt","gemini","perplexity","kimi","deepseek"].includes(agentId)){
+    } else if(["gemini","perplexity"].includes(agentId)){
       const content=[];
       imageFiles.forEach(f=>{content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}});});
       content.push({type:"text",text:enrichedMsg});
       agentHistory=[...history.slice(0,-1),{role:"user",content}];
     }
-
+    // DeepSeek не поддерживает изображения — только текст/OCR
+    else if(agentId==="deepseek"){
+      showToast("⚠️ DeepSeek не умеет распознавать изображения — переключись на GLM/Gemini/Perplexity, если нужно прочитать фото");
+    }
   }
 
   // UI
@@ -5264,7 +5448,6 @@ async function sendQuick(text, inp){
 // 🏃 ВАРИАНТ В — ПЕРВЫЙ ОТВЕТИВШИЙ
 // ════════════════════════════════════════════════════════════════
 async function sendFirst(){
-  if(filesBusy()) return;
   if(thinking) return;
   const inp=document.getElementById("queryInput");
   const text=inp.value.trim();
@@ -5349,7 +5532,7 @@ async function sendFirst(){
           const content=[{type:"text",text:lastMsg.content}];
           imageFiles.forEach(f=>{const mt=f.type==="image/jpg"?"image/jpeg":f.type;content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image",source:{type:"base64",media_type:mt,data:f.b64}});});
           agentHistory=[...agentHistory.slice(0,-1),{role:"user",content}];
-        } else if(["gemini","gpt","perplexity","kimi","deepseek"].includes(a.id)){
+        } else if(["gemini","perplexity"].includes(a.id)){
           const content=[];
           imageFiles.forEach(f=>{content.push({type:"text",text:"[Изображение: "+f.name+"]"});content.push({type:"image_url",image_url:{url:`data:${f.type};base64,${f.b64}`}});});
           content.push({type:"text",text:lastMsg.content});
@@ -5381,7 +5564,7 @@ async function sendFirst(){
 }
 
 // ════════════════════════════════════════════════════════════════
-// 🔗 РЕЖИМ ЦЕПОЧКА — 6 агентов передают контекст друг другу
+// 🔗 РЕЖИМ ЦЕПОЧКА — агенты передают контекст друг другу
 // ════════════════════════════════════════════════════════════════
 async function sendChain(text, inp){
   const today=getToday();
@@ -5431,7 +5614,7 @@ async function sendChain(text, inp){
     container.insertBefore(bar,container.firstChild);
   }
 
-  const visionSet=new Set(["claude","gemini","perplexity","gpt","kimi","deepseek"]);
+  const visionSet=new Set(["claude","gemini","perplexity"]);
   function makeVisionHistoryFor(a, baseHistory, msgText){
     if(!imageFiles.length) return [...baseHistory.slice(0,-1),{role:"user",content:today+msgText}];
     if(a.id==="claude"){
@@ -5562,7 +5745,6 @@ async function sendChain(text, inp){
 // MODE PICKER — попап выбора режима при отправке
 // ════════════════════════════════════════════════════════════════
 function showModePicker(){
-  if(filesBusy()) return;
   if(thinking) return;
   const inp=document.getElementById("queryInput");
   const text=inp.value.trim();
@@ -5596,7 +5778,6 @@ function pickMode(mode){
 }
 
 async function send(){
-  if(filesBusy()) return;
   if(thinking) return;
   const inp=document.getElementById("queryInput");
   const text=inp.value.trim();
@@ -5784,7 +5965,7 @@ async function send(){
   appendTurnContainer(turnId,agents,cols);
 
   const results={};
-  const visionSet=new Set(["claude","gemini","perplexity","gpt","kimi","deepseek"]);
+  const visionSet=new Set(["claude","gemini","perplexity"]);
 
   // Функция создания onChunk для агента — показывает стрим в карточке
   function makeChunkHandler(a){
@@ -6363,8 +6544,6 @@ async function callByAgentId(agentId, system, history){
       case "gemini":     return keys.gemini?await callGemini(keys.gemini,system,history):null;
       case "perplexity": return keys.perplexity?await callPerplexity(keys.perplexity,system,history):null;
       case "deepseek":   return keys.deepseek?await callDeepSeek(keys.deepseek,system,history):null;
-      case "kimi":       return keys.kimi?await callKimi(keys.kimi,system,history):null;
-      case "gpt":        return keys.gpt?await callOpenAI(keys.gpt,system,history):null;
       default: return null;
     }
   }catch(e){ return null; } // не смогли конкретным агентом — пусть решает synthesize()
@@ -6446,28 +6625,6 @@ async function exportPptxReal(turnId, preferredAgentId){
     await pres.writeFile({ fileName: fname + ".pptx" });
     showToast("✅ PPTX скачан!");
   }catch(e){ showToast("❌ Ошибка: "+e.message); }
-}
-
-async function kimiPresent(turnId){
-  const el=document.getElementById(turnId+"_consolidated");
-  if(!el) return;
-  const keys=getKeys();
-  if(!keys.kimi){alert("Добавь ключ Kimi в ⚙️ Настройки → platform.kimi.ai");return;}
-  const chat=getChat();
-  showToast("🔵 Kimi генерирует слайды...");
-  try{
-    const system="Ты генератор презентаций. Возвращай ТОЛЬКО валидный JSON без markdown.";
-    const prompt=`Создай презентацию. Тема: ${chat?chat.title:"Презентация"}. Текст: ${(el.dataset.raw||el.textContent).slice(0,3000)}\n\nВерни ТОЛЬКО JSON:\n{"title":"Название","slides":[{"type":"title","heading":"Заголовок","body":"Подзаголовок"},{"type":"points","heading":"Раздел","points":["Тезис 1","Тезис 2","Тезис 3"]},{"type":"quote","quote":"Вывод","author":"Kimi"},{"type":"conclusion","heading":"Итоги","body":"Вывод"}]}\nСоздай 7-9 слайдов.`;
-    const h=[{role:"user",content:prompt}];
-    let raw;
-    raw=await callKimi(keys.kimi,system,h);
-    const cleaned=raw.replace(/```json\s*/gi,"").replace(/```\s*/gi,"").trim();
-    const match=cleaned.match(/\{[\s\S]*\}/);
-    let data;
-    try{data=JSON.parse(match?match[0]:cleaned);}catch(e){showKimiModal(raw,chat?chat.title:"Презентация");return;}
-    showToast("✅ Kimi слайды готовы!");
-    buildRevealPresentation(data);
-  }catch(e){alert("Ошибка Kimi: "+e.message);}
 }
 
 function buildRevealPresentation(data){
@@ -6556,13 +6713,6 @@ function showRevealModal(html, title){
 
 function openRevealNewTab(){
   if(window._revealHtml){const w=window.open("","_blank");if(w){w.document.write(window._revealHtml);w.document.close();}}
-}
-
-function showKimiModal(text, title){
-  document.getElementById("kimiModalTopic").textContent=title;
-  document.getElementById("kimiModalContent").textContent=text;
-  document.getElementById("kimiCopyBtn").onclick=()=>navigator.clipboard.writeText(text).then(()=>showToast("📋 Скопировано!"));
-  document.getElementById("kimiModal").style.display="flex";
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -7391,7 +7541,6 @@ function showSettings(){
   document.getElementById("key_gemini").value=keys.gemini||"";
   document.getElementById("key_perplexity").value=keys.perplexity||"";
   document.getElementById("key_deepseek").value=keys.deepseek||"";
-  document.getElementById("key_kimi").value=keys.kimi||"";
   document.getElementById("key_gpt").value=keys.gpt||"";
   document.getElementById("key_gamma").value=keys.gamma||"";
   document.getElementById("key_tavily").value=keys.tavily||"";
@@ -7411,14 +7560,12 @@ function saveSettings(){
     perplexity:cleanKey(document.getElementById("key_perplexity").value),
     deepseek:cleanKey(document.getElementById("key_deepseek").value),
     tavily:cleanKey(document.getElementById("key_tavily").value),
-    kimi:cleanKey(document.getElementById("key_kimi").value),
     gpt:cleanKey(document.getElementById("key_gpt").value),
     gamma:cleanKey(document.getElementById("key_gamma").value),
   };
   saveKeys(newKeys);
   // Автоматически включаем агентов если введён ключ
   // Отключаем если ключ удалён
-  activeAgentIds = activeAgentIds.filter(x=>x!=="kimi" && x!=="gpt");
   localStorage.setItem("active_agents",JSON.stringify(activeAgentIds));
   // Сохраняем в облако
   if(window.cloudSync) window.cloudSync.saveSettings(newKeys, activeAgentIds).catch(()=>{});
@@ -7447,9 +7594,9 @@ function renderAgentToggles(){
 // ════════════════════════════════════════════════════════════════
 function showToast(msg){
   let t=document.getElementById("toast");
-  if(!t){t=document.createElement("div");t.id="toast";t.style.cssText="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f1f5f9;padding:10px 18px;border-radius:10px;font-size:14px;z-index:300;border:1px solid #374151;box-shadow:0 4px 20px rgba(0,0,0,.5);transition:opacity .3s;white-space:normal;max-width:90vw;text-align:center";document.body.appendChild(t);}
+  if(!t){t=document.createElement("div");t.id="toast";t.style.cssText="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f1f5f9;padding:10px 18px;border-radius:10px;font-size:14px;z-index:300;border:1px solid #374151;box-shadow:0 4px 20px rgba(0,0,0,.5);transition:opacity .3s;white-space:nowrap";document.body.appendChild(t);}
   t.textContent=msg; t.style.opacity="1";
-  clearTimeout(t._t); t._t=setTimeout(()=>t.style.opacity="0",Math.min(8000,Math.max(3000,String(msg).length*70)));
+  clearTimeout(t._t); t._t=setTimeout(()=>t.style.opacity="0",3000);
 }
 
 function toggleSidebar(){
@@ -7489,7 +7636,7 @@ function initApp(){
 
   // Auto-show settings if no keys
   const k=getKeys();
-  if(!k.claude&&!k.gemini&&!k.deepseek&&!k.perplexity&&!k.kimi){
+  if(!k.claude&&!k.gemini&&!k.deepseek&&!k.perplexity){
     setTimeout(showSettings, 500);
   }
 }
