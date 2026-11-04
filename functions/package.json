@@ -3,7 +3,7 @@
   "description": "Cloud Functions for AI Hub 2 (proxy + samsung-webhook)",
   "main": "index.js",
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "dependencies": {
     "firebase-admin": "^12.0.0",
